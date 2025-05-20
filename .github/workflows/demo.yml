@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4.2.2
 
-      - name: Clean frontend artifacts
+      - name: Clean demo artifacts
         run: |
           rm -rf demo/node_modules
           rm -rf demo/dist
@@ -39,7 +39,7 @@ jobs:
           cd demo
           pnpm install --force --no-cache
 
-      - name: Build frontend
+      - name: Build demo
         run: |
           cd demo
           pnpm run build
@@ -47,6 +47,4 @@ jobs:
       - name: Run lint
         run: |
           cd demo
-          rm cypress.config.d.ts
-          rm vitest.config.d.ts
           pnpm run lint --no-cache
