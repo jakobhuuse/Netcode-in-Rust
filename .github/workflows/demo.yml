@@ -22,8 +22,8 @@ jobs:
 
       - name: Clean frontend artifacts
         run: |
-          rm -rf frontend/node_modules
-          rm -rf frontend/dist
+          rm -rf demo/node_modules
+          rm -rf demo/dist
 
       - name: Set up Node.js
         uses: actions/setup-node@v3.9.1
@@ -36,17 +36,17 @@ jobs:
 
       - name: Install dependencies
         run: |
-          cd frontend
+          cd demo
           pnpm install --force --no-cache
 
       - name: Build frontend
         run: |
-          cd frontend
+          cd demo
           pnpm run build
 
       - name: Run lint
         run: |
-          cd frontend
+          cd demo
           rm cypress.config.d.ts
           rm vitest.config.d.ts
           pnpm run lint --no-cache
