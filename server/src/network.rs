@@ -4,6 +4,7 @@ use std::{
     net::{TcpListener, TcpStream},
     sync::{
         atomic::{AtomicUsize, Ordering},
+        mpsc::Sender,
         Arc, Mutex,
     },
     thread,
@@ -13,6 +14,13 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use sha1::{Digest, Sha1};
 
 type ClientMap = Arc<Mutex<HashMap<usize, TcpStream>>>;
+
+/// GameCommand enum for handling game-related commands
+pub enum GameCommand {
+    AddPlayer { id: usize },
+    RemovePlayer { id: usize },
+    Move { id: usize, dx: f32, dy: f32 },
+}
 
 /// A simple WebSocket server implementation
 pub struct NetworkServer {
@@ -31,8 +39,8 @@ impl NetworkServer {
         }
     }
 
-    /// Start the WebSocket server
-    pub fn start(&self) -> Result<(), std::io::Error> {
+    /// Start the WebSocket server with a channel for game commands
+    pub fn start(&self, cmd_sender: Sender<GameCommand>) -> Result<(), std::io::Error> {
         let listener = TcpListener::bind(&self.addr)?;
         println!("WebSocket server listening on ws://{}", self.addr);
 
@@ -48,8 +56,9 @@ impl NetworkServer {
                         .insert(id, stream.try_clone().unwrap());
 
                     let server_ref = self.clone_refs();
+                    let cmd_sender_clone = cmd_sender.clone();
                     thread::spawn(move || {
-                        server_ref.handle_client(stream, id);
+                        server_ref.handle_client(stream, id, cmd_sender_clone);
                     });
                 }
                 Err(e) => {
@@ -57,7 +66,6 @@ impl NetworkServer {
                 }
             }
         }
-
         Ok(())
     }
 
@@ -82,8 +90,8 @@ impl NetworkServer {
         }
     }
 
-    /// Handle an individual client connection
-    fn handle_client(&self, mut stream: TcpStream, id: usize) {
+    /// Handle an individual client connection with a channel for game commands
+    fn handle_client(&self, mut stream: TcpStream, id: usize, cmd_sender: Sender<GameCommand>) {
         let mut buffer = [0; 1024];
 
         if let Ok(size) = stream.read(&mut buffer) {
@@ -102,12 +110,15 @@ impl NetworkServer {
                 stream.write_all(response.as_bytes()).unwrap();
                 println!("Handshake completed for client {}!", id);
 
+                let _ = cmd_sender.send(GameCommand::AddPlayer { id });
+
                 loop {
                     let mut frame = [0; 1024];
                     match stream.read(&mut frame) {
                         Ok(size) if size == 0 => {
                             println!("Client {} disconnected abruptly.", id);
                             self.clients.lock().unwrap().remove(&id);
+                            let _ = cmd_sender.send(GameCommand::RemovePlayer { id });
                             break;
                         }
                         Ok(size) => {
@@ -119,6 +130,7 @@ impl NetworkServer {
                                     id
                                 );
                                 self.clients.lock().unwrap().remove(&id);
+                                let _ = cmd_sender.send(GameCommand::RemovePlayer { id });
                                 let close_frame = vec![0x88, 0x00];
                                 stream.write_all(&close_frame).unwrap();
                                 break;
@@ -127,11 +139,21 @@ impl NetworkServer {
                             let message = self.parse_websocket_frame(&frame[..size]);
                             println!("Received from client {}: {}", id, message);
 
-                            self.broadcast_message(&message);
+                            if let Some(rest) = message.strip_prefix("move ") {
+                                let parts: Vec<&str> = rest.split_whitespace().collect();
+                                if parts.len() == 2 {
+                                    if let (Ok(dx), Ok(dy)) =
+                                        (parts[0].parse::<f32>(), parts[1].parse::<f32>())
+                                    {
+                                        let _ = cmd_sender.send(GameCommand::Move { id, dx, dy });
+                                    }
+                                }
+                            }
                         }
                         Err(_) => {
                             println!("Error reading from client {}. Disconnecting...", id);
                             self.clients.lock().unwrap().remove(&id);
+                            let _ = cmd_sender.send(GameCommand::RemovePlayer { id });
                             break;
                         }
                     }
