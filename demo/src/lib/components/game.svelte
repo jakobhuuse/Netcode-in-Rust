@@ -1,6 +1,5 @@
 <script lang="ts">
 	import Checkbox from './ui/checkbox/checkbox.svelte';
-	import Input from './ui/input/input.svelte';
 	import Label from './ui/label/label.svelte';
 
 	interface GameProps {
@@ -18,9 +17,6 @@
 	let { title = 'Game' }: GameProps = $props();
 
 	let canvas = $state<HTMLCanvasElement>();
-	let prediction = $state(false);
-	let reconciliation = $state(false);
-	let interpolation = $state(false);
 
 	let players = $state<Player[]>([
 		{ id: 'player1', x: 100, y: 100, radius: 20, color: 'blue' },
@@ -143,7 +139,7 @@
 				<Label
 					id="prediction-label"
 					for="prediction"
-					class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+					class="text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
 				>
 					Prediction
 				</Label>
@@ -153,7 +149,7 @@
 				<Label
 					id="reconciliation-label"
 					for="reconciliation"
-					class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+					class="text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
 				>
 					reconciliation
 				</Label>
@@ -163,7 +159,7 @@
 				<Label
 					id="interpolation-label"
 					for="interpolation"
-					class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+					class="text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
 				>
 					interpolation
 				</Label>
