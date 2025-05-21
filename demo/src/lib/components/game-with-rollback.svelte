@@ -18,33 +18,6 @@
 		color: string;
 	}
 
-	// Packet definitions
-	interface ConnectionRequest {
-		type: 'ConnectionRequest';
-		client_version: number;
-	}
-
-	interface ConnectionAccepted {
-		type: 'ConnectionAccepted';
-		client_id: number;
-	}
-
-	interface PlayerInput {
-		type: 'PlayerInput';
-		sequence: number;
-		timestamp: number;
-		input_vector: [number, number];
-	}
-
-	interface GameState {
-		type: 'GameState';
-		timestamp: number;
-		last_processed_input: Record<string, number>; // client_id -> sequence
-		entities: Entity[];
-	}
-
-	type Packet = ConnectionRequest | ConnectionAccepted | PlayerInput | GameState;
-
 	// Props
 	let { title = 'Game', serverUrl = 'ws://localhost:8080' }: GameProps = $props();
 
@@ -59,7 +32,9 @@
 	let pingMs = $state(0);
 	let socket = $state<WebSocket | null>(null);
 	let nextSequence = $state(1);
-	let pendingInputs = $state<PlayerInput[]>([]);
+	let pendingInputs = $state<any[]>([]);
+	let lastInputTime = $state(0);
+	let inputCooldown = $state(100); // milliseconds between inputs for incremental movement
 
 	// Game canvas size
 	const canvasWidth = 800;
@@ -69,12 +44,15 @@
 	let enablePrediction = $state(true);
 	let enableReconciliation = $state(true);
 	let enableInterpolation = $state(false); // For visual smoothing
+	let incrementalMovement = $state(true); // New setting for incremental movement
 
 	// Movement input state
 	let keysPressed = $state(new Set<string>());
+	let processedKeys = $state(new Set<string>()); // Track keys that have been processed
 
 	// Client-side prediction physics constants (should match server)
 	const PLAYER_SPEED = 200; // pixels per second
+	const MOVE_STEP = 10; // pixels per step for incremental movement
 
 	// Connect to the WebSocket server
 	function connectToServer() {
@@ -88,10 +66,11 @@
 			console.log('Connected to server');
 			connected = true;
 
-			// Send connection request
-			const packet: ConnectionRequest = {
-				type: 'ConnectionRequest',
-				client_version: 1
+			// Send connection request with correct format
+			const packet = {
+				ConnectionRequest: {
+					client_version: 1
+				}
 			};
 
 			if (socket) {
@@ -103,6 +82,7 @@
 			console.log('Disconnected from server');
 			connected = false;
 			clientId = null;
+			entities = [];
 		};
 
 		socket.onerror = (error) => {
@@ -119,9 +99,38 @@
 		};
 	}
 
+	// Send regular heartbeats to prevent timeout
+	function startHeartbeat() {
+		const heartbeatInterval = setInterval(() => {
+			if (socket && socket.readyState === WebSocket.OPEN) {
+				const heartbeat = {
+					Heartbeat: {
+						timestamp: Date.now()
+					}
+				};
+				socket.send(JSON.stringify(heartbeat));
+			} else {
+				clearInterval(heartbeatInterval);
+			}
+		}, 2000); // Send heartbeat every 2 seconds
+
+		// Clean up the interval when the component is destroyed
+		onDestroy(() => {
+			clearInterval(heartbeatInterval);
+		});
+	}
+
+	// Get entity corresponding to this client
+	function getMyEntity() {
+		if (clientId === null) return null;
+
+		// Find entity that belongs to this client
+		return entities.find((e) => e.id % 1000 === clientId % 1000);
+	}
+
 	// Handle incoming server packets
 	function handleServerPacket(packet: any) {
-		// Convert server packet format to our client format
+		// Handle differently formatted packets
 		if (packet.ConnectionAccepted) {
 			const clientIdReceived = packet.ConnectionAccepted.client_id;
 			console.log(`Connection accepted, client ID: ${clientIdReceived}`);
@@ -154,11 +163,9 @@
 					pendingInputs = pendingInputs.filter((input) => input.sequence > lastProcessedInput);
 
 					// Find our entity
-					const myEntity = serverEntities.find((e: Entity) => {
-						// Match entity to client - this depends on your server implementation
-						// Usually there's a mapping between client ID and entity ID
-						return clientId !== null && e.id % 1000 === clientId % 1000; // Simple example mapping
-					});
+					const myEntity = serverEntities.find(
+						(e: Entity) => clientId !== null && e.id % 1000 === clientId % 1000
+					);
 
 					if (myEntity && pendingInputs.length > 0) {
 						// Re-apply all pending inputs
@@ -185,24 +192,47 @@
 
 	// Apply input to an entity (client-side prediction)
 	function applyInput(entity: Entity, inputVector: [number, number], deltaTime: number) {
-		// Normalize input vector if needed
-		const [inputX, inputY] = inputVector;
-		const magnitude = Math.sqrt(inputX * inputX + inputY * inputY);
+		// For incremental movement, apply a fixed step in the input direction
+		if (incrementalMovement) {
+			// Normalize input vector if needed
+			const [inputX, inputY] = inputVector;
+			const magnitude = Math.sqrt(inputX * inputX + inputY * inputY);
 
-		let normalizedX = 0;
-		let normalizedY = 0;
+			let normalizedX = 0;
+			let normalizedY = 0;
 
-		if (magnitude > 0) {
-			normalizedX = inputX / magnitude;
-			normalizedY = inputY / magnitude;
+			if (magnitude > 0) {
+				normalizedX = inputX / magnitude;
+				normalizedY = inputY / magnitude;
+			}
+
+			// Apply a step in the input direction
+			entity.position[0] += normalizedX * MOVE_STEP;
+			entity.position[1] += normalizedY * MOVE_STEP;
+
+			// Set velocity to 0 (for incremental movement)
+			entity.velocity = [0, 0];
+		} else {
+			// Original velocity-based movement
+			// Normalize input vector if needed
+			const [inputX, inputY] = inputVector;
+			const magnitude = Math.sqrt(inputX * inputX + inputY * inputY);
+
+			let normalizedX = 0;
+			let normalizedY = 0;
+
+			if (magnitude > 0) {
+				normalizedX = inputX / magnitude;
+				normalizedY = inputY / magnitude;
+			}
+
+			// Update velocity
+			entity.velocity = [normalizedX * PLAYER_SPEED, normalizedY * PLAYER_SPEED];
+
+			// Update position
+			entity.position[0] += entity.velocity[0] * deltaTime;
+			entity.position[1] += entity.velocity[1] * deltaTime;
 		}
-
-		// Update velocity
-		entity.velocity = [normalizedX * PLAYER_SPEED, normalizedY * PLAYER_SPEED];
-
-		// Update position
-		entity.position[0] += entity.velocity[0] * deltaTime;
-		entity.position[1] += entity.velocity[1] * deltaTime;
 
 		// Apply boundary constraints
 		entity.position[0] = Math.max(
@@ -221,21 +251,24 @@
 	function sendInput(inputVector: [number, number]) {
 		if (!connected || clientId === null) return;
 
+		// Check cooldown for incremental movement
+		const now = Date.now();
+		if (incrementalMovement && now - lastInputTime < inputCooldown) {
+			return; // Still on cooldown
+		}
+		lastInputTime = now;
+
 		// Create input packet
-		const input: PlayerInput = {
-			type: 'PlayerInput',
+		const input = {
 			sequence: nextSequence++,
-			timestamp: Date.now(),
+			timestamp: now,
 			input_vector: inputVector
 		};
 
 		// Apply client-side prediction if enabled
 		if (enablePrediction) {
 			// Find our entity
-			const myEntity = entities.find((e) => {
-				// Match entity to client - simple example mapping
-				return clientId !== null && e.id % 1000 === clientId % 1000;
-			});
+			const myEntity = getMyEntity();
 
 			// If we have an entity, apply the input immediately
 			if (myEntity) {
@@ -252,7 +285,16 @@
 		}
 
 		// Store this input for reconciliation
-		pendingInputs = [...pendingInputs, input];
+		if (enableReconciliation) {
+			pendingInputs = [
+				...pendingInputs,
+				{
+					sequence: input.sequence,
+					timestamp: input.timestamp,
+					input_vector: input.input_vector
+				}
+			];
+		}
 
 		// Convert to server packet format
 		const packet = {
@@ -273,14 +315,30 @@
 	function processInput() {
 		if (clientId === null) return;
 
+		// Check if there are any keys pressed that haven't been processed yet
+		const unprocessedKeys = new Set<string>();
+		for (const key of keysPressed) {
+			if (!processedKeys.has(key)) {
+				unprocessedKeys.add(key);
+			}
+		}
+
+		// If using incremental movement and no new keys, return
+		if (incrementalMovement && unprocessedKeys.size === 0) {
+			return;
+		}
+
 		// Calculate input vector based on keys pressed
 		let dx = 0;
 		let dy = 0;
 
-		const up = keysPressed.has('w') || keysPressed.has('arrowup');
-		const down = keysPressed.has('s') || keysPressed.has('arrowdown');
-		const left = keysPressed.has('a') || keysPressed.has('arrowleft');
-		const right = keysPressed.has('d') || keysPressed.has('arrowright');
+		// Use either all keys or just unprocessed keys depending on movement mode
+		const keysToProcess = incrementalMovement ? unprocessedKeys : keysPressed;
+
+		const up = keysToProcess.has('w') || keysToProcess.has('arrowup');
+		const down = keysToProcess.has('s') || keysToProcess.has('arrowdown');
+		const left = keysToProcess.has('a') || keysToProcess.has('arrowleft');
+		const right = keysToProcess.has('d') || keysToProcess.has('arrowright');
 
 		if (up && !down) dy = -1;
 		else if (down && !up) dy = 1;
@@ -291,16 +349,32 @@
 		// Only send input if there's actual movement
 		if (dx !== 0 || dy !== 0) {
 			sendInput([dx, dy]);
+
+			// For incremental movement, mark keys as processed
+			if (incrementalMovement) {
+				for (const key of unprocessedKeys) {
+					processedKeys.add(key);
+				}
+			}
 		}
 	}
 
 	// Keyboard event handlers
 	function handleKeyDown(event: KeyboardEvent) {
-		keysPressed.add(event.key.toLowerCase());
+		const key = event.key.toLowerCase();
+
+		// Prevent default behavior for arrow keys and WASD
+		if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'w', 'a', 's', 'd'].includes(key)) {
+			event.preventDefault();
+		}
+
+		keysPressed.add(key);
 	}
 
 	function handleKeyUp(event: KeyboardEvent) {
-		keysPressed.delete(event.key.toLowerCase());
+		const key = event.key.toLowerCase();
+		keysPressed.delete(key);
+		processedKeys.delete(key); // Remove from processed keys
 	}
 
 	// Render the game
@@ -388,6 +462,9 @@
 		// Connect to server
 		connectToServer();
 
+		// Start heartbeat to prevent timeouts
+		startHeartbeat();
+
 		// Set up event listeners
 		window.addEventListener('keydown', handleKeyDown);
 		window.addEventListener('keyup', handleKeyUp);
@@ -458,16 +535,16 @@
 			</div>
 			<div class="flex items-center gap-2 p-2">
 				<Checkbox
-					id="interpolation"
-					bind:checked={enableInterpolation}
-					aria-labelledby="interpolation-label"
+					id="incremental"
+					bind:checked={incrementalMovement}
+					aria-labelledby="incremental-label"
 				/>
 				<Label
-					id="interpolation-label"
-					for="interpolation"
+					id="incremental-label"
+					for="incremental"
 					class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
 				>
-					Interpolation
+					Incremental
 				</Label>
 			</div>
 		</div>
@@ -486,6 +563,7 @@
 			<p class="text-red-500">Not connected to server. Trying to connect to {serverUrl}...</p>
 		{:else}
 			<p class="text-green-500">Connected to server! Your client ID: {clientId}</p>
+			<p class="text-gray-500">Players in game: {entities.length}</p>
 		{/if}
 	</div>
 </div>
