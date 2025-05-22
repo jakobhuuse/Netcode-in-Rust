@@ -4,6 +4,7 @@ mod physics;
 use clap::Parser;
 use game::GameState;
 use network::{GameCommand, NetworkServer};
+use physics::Vector2;
 use serde_json;
 use std::sync::{mpsc, Arc};
 use std::{thread, time::Duration};
@@ -22,7 +23,7 @@ fn main() {
         port: u16,
 
         /// Tick rate (updates per second)
-        #[clap(short, long, default_value = "1")]
+        #[clap(short, long, default_value = "30")]
         tick_rate: u32,
     }
 
@@ -48,6 +49,7 @@ fn main() {
         }
     });
 
+    game_state.add_static_object(Vector2 { x: 0.0, y: -10.0 }, 200.0, 20.0);
     loop {
         // Handle all pending commands from network
         while let Ok(cmd) = cmd_reciver.try_recv() {
@@ -83,11 +85,11 @@ fn main() {
         game_state.update_positions(tick_interval.as_secs_f32());
 
         for (id, seq) in game_state.get_player_seqs() {
-            server.send_message_to_client(id, &format!("last_seq: {}", seq));
+            server.send_message_to_client(id, &serde_json::to_string(&seq).unwrap());
         }
 
         // Broadcast gamestate
-        let positions = game_state.get_player_positions();
+        let positions = game_state.get_object_positions();
         let msg = serde_json::to_string(&positions).unwrap();
         server.broadcast_message(&msg);
 
