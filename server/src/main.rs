@@ -1,5 +1,6 @@
 mod game;
 mod network;
+mod physics;
 use clap::Parser;
 use game::GameState;
 use network::{GameCommand, NetworkServer};
@@ -56,17 +57,40 @@ fn main() {
                 GameCommand::RemovePlayer { id } => {
                     game_state.remove_player(id);
                 }
-                GameCommand::Move { id, dx, dy } => {
-                    game_state.move_player(id, (dx, dy));
+                GameCommand::PlayerAction { id, action, seq } => {
+                    game_state.player_action(id, action, seq);
+                }
+                GameCommand::SetPlayerGravity { id, gravity } => {
+                    game_state.set_player_gravity(id, gravity);
+                }
+                GameCommand::SetPlayerMaxSpeed { id, max_speed } => {
+                    game_state.set_player_max_speed(id, max_speed);
+                }
+                GameCommand::SetPlayerAccelerationSpeed {
+                    id,
+                    acceleration_speed,
+                } => {
+                    game_state.set_player_acceleration_speed(id, acceleration_speed);
+                }
+                GameCommand::SetPlayerJumpSpeed { id, jump_speed } => {
+                    game_state.set_player_jump_speed(id, jump_speed);
                 }
             }
         }
 
-        // Broadcast game state to all clients
+        // Update the gamestate
+        game_state.update_positions(tick_interval.as_secs_f32());
+
+        for (id, seq) in game_state.get_player_seqs() {
+            server.send_message_to_client(id, &seq.to_string());
+        }
+
+        // Broadcast gamestate
         let positions = game_state.get_player_positions();
         let msg = format!("{:?}", positions);
         server.broadcast_message(&msg);
 
+        // Sleep game-thread
         thread::sleep(tick_interval);
     }
 }
