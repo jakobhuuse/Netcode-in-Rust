@@ -4,6 +4,7 @@ mod physics;
 use clap::Parser;
 use game::GameState;
 use network::{GameCommand, NetworkServer};
+use serde_json;
 use std::sync::{mpsc, Arc};
 use std::{thread, time::Duration};
 
@@ -57,9 +58,6 @@ fn main() {
                 GameCommand::RemovePlayer { id } => {
                     game_state.remove_player(id);
                 }
-                GameCommand::PlayerAction { id, action, seq } => {
-                    game_state.player_action(id, action, seq);
-                }
                 GameCommand::SetPlayerGravity { id, gravity } => {
                     game_state.set_player_gravity(id, gravity);
                 }
@@ -75,6 +73,9 @@ fn main() {
                 GameCommand::SetPlayerJumpSpeed { id, jump_speed } => {
                     game_state.set_player_jump_speed(id, jump_speed);
                 }
+                GameCommand::PlayerInput { id, input } => {
+                    game_state.update_player_input(id, input);
+                }
             }
         }
 
@@ -82,12 +83,12 @@ fn main() {
         game_state.update_positions(tick_interval.as_secs_f32());
 
         for (id, seq) in game_state.get_player_seqs() {
-            server.send_message_to_client(id, &seq.to_string());
+            server.send_message_to_client(id, &format!("last_seq: {}", seq));
         }
 
         // Broadcast gamestate
         let positions = game_state.get_player_positions();
-        let msg = format!("{:?}", positions);
+        let msg = serde_json::to_string(&positions).unwrap();
         server.broadcast_message(&msg);
 
         // Sleep game-thread

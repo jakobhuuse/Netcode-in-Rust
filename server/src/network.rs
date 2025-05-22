@@ -10,7 +10,7 @@ use std::{
     thread,
 };
 
-use crate::game::PlayerAction;
+use crate::game::PlayerInputState;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use sha1::{Digest, Sha1};
 
@@ -18,33 +18,13 @@ type ClientMap = Arc<Mutex<HashMap<usize, TcpStream>>>;
 
 /// GameCommand enum for handling game-related commands
 pub enum GameCommand {
-    AddPlayer {
-        id: usize,
-    },
-    RemovePlayer {
-        id: usize,
-    },
-    PlayerAction {
-        id: usize,
-        seq: u32,
-        action: PlayerAction,
-    },
-    SetPlayerGravity {
-        id: usize,
-        gravity: f32,
-    },
-    SetPlayerMaxSpeed {
-        id: usize,
-        max_speed: f32,
-    },
-    SetPlayerAccelerationSpeed {
-        id: usize,
-        acceleration_speed: f32,
-    },
-    SetPlayerJumpSpeed {
-        id: usize,
-        jump_speed: f32,
-    },
+    AddPlayer { id: usize },
+    RemovePlayer { id: usize },
+    SetPlayerGravity { id: usize, gravity: f32 },
+    SetPlayerMaxSpeed { id: usize, max_speed: f32 },
+    SetPlayerAccelerationSpeed { id: usize, acceleration_speed: f32 },
+    SetPlayerJumpSpeed { id: usize, jump_speed: f32 },
+    PlayerInput { id: usize, input: PlayerInputState },
 }
 
 /// A simple WebSocket server implementation
@@ -213,15 +193,11 @@ impl NetworkServer {
                                         });
                                     }
                                 }
-                                _ if parts.len() == 2 => {
-                                    if let (Ok(action), Ok(seq)) =
-                                        (parts[0].parse::<PlayerAction>(), parts[1].parse::<u32>())
-                                    {
-                                        let _ = cmd_sender.send(GameCommand::PlayerAction {
-                                            id,
-                                            seq,
-                                            action,
-                                        });
+
+                                _ if parts.iter().any(|p| p.contains('=')) => {
+                                    if let Ok(input) = message.parse::<PlayerInputState>() {
+                                        let _ =
+                                            cmd_sender.send(GameCommand::PlayerInput { id, input });
                                     }
                                 }
                                 _ => {
