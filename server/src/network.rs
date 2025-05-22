@@ -10,6 +10,7 @@ use std::{
     thread,
 };
 
+use crate::game::PlayerAction;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use sha1::{Digest, Sha1};
 
@@ -17,9 +18,33 @@ type ClientMap = Arc<Mutex<HashMap<usize, TcpStream>>>;
 
 /// GameCommand enum for handling game-related commands
 pub enum GameCommand {
-    AddPlayer { id: usize },
-    RemovePlayer { id: usize },
-    Move { id: usize, dx: f32, dy: f32 },
+    AddPlayer {
+        id: usize,
+    },
+    RemovePlayer {
+        id: usize,
+    },
+    PlayerAction {
+        id: usize,
+        seq: u32,
+        action: PlayerAction,
+    },
+    SetPlayerGravity {
+        id: usize,
+        gravity: f32,
+    },
+    SetPlayerMaxSpeed {
+        id: usize,
+        max_speed: f32,
+    },
+    SetPlayerAccelerationSpeed {
+        id: usize,
+        acceleration_speed: f32,
+    },
+    SetPlayerJumpSpeed {
+        id: usize,
+        jump_speed: f32,
+    },
 }
 
 /// A simple WebSocket server implementation
@@ -90,6 +115,20 @@ impl NetworkServer {
         }
     }
 
+    /// Send a message to a specific client by id
+    pub fn send_message_to_client(&self, id: usize, message: &str) {
+        let frame = self.create_websocket_frame(message.to_string());
+        let clients = self.clients.lock().unwrap();
+        if let Some(stream) = clients.get(&id) {
+            // Try to clone the stream to avoid locking issues
+            if let Ok(mut stream) = stream.try_clone() {
+                if let Err(e) = stream.write_all(&frame) {
+                    eprintln!("Failed to send to client {}: {}", id, e);
+                }
+            }
+        }
+    }
+
     /// Handle an individual client connection with a channel for game commands
     fn handle_client(&self, mut stream: TcpStream, id: usize, cmd_sender: Sender<GameCommand>) {
         let mut buffer = [0; 1024];
@@ -136,17 +175,57 @@ impl NetworkServer {
                                 break;
                             }
 
-                            let message = self.parse_websocket_frame(&frame[..size]);
+                            let message = self.parse_websocket_frame(&frame[..size]).to_lowercase();
                             println!("Received from client {}: {}", id, message);
 
-                            if let Some(rest) = message.strip_prefix("move ") {
-                                let parts: Vec<&str> = rest.split_whitespace().collect();
-                                if parts.len() == 2 {
-                                    if let (Ok(dx), Ok(dy)) =
-                                        (parts[0].parse::<f32>(), parts[1].parse::<f32>())
-                                    {
-                                        let _ = cmd_sender.send(GameCommand::Move { id, dx, dy });
+                            let parts: Vec<&str> = message.split_whitespace().collect();
+                            if parts.is_empty() {
+                                continue;
+                            }
+                            match parts[0] {
+                                "set_gravity" if parts.len() == 2 => {
+                                    if let Ok(gravity) = parts[1].parse::<f32>() {
+                                        let _ = cmd_sender
+                                            .send(GameCommand::SetPlayerGravity { id, gravity });
                                     }
+                                }
+                                "set_max_speed" if parts.len() == 2 => {
+                                    if let Ok(max_speed) = parts[1].parse::<f32>() {
+                                        let _ = cmd_sender
+                                            .send(GameCommand::SetPlayerMaxSpeed { id, max_speed });
+                                    }
+                                }
+                                "set_acceleration_speed" if parts.len() == 2 => {
+                                    if let Ok(acceleration_speed) = parts[1].parse::<f32>() {
+                                        let _ = cmd_sender.send(
+                                            GameCommand::SetPlayerAccelerationSpeed {
+                                                id,
+                                                acceleration_speed,
+                                            },
+                                        );
+                                    }
+                                }
+                                "set_jump_speed" if parts.len() == 2 => {
+                                    if let Ok(jump_speed) = parts[1].parse::<f32>() {
+                                        let _ = cmd_sender.send(GameCommand::SetPlayerJumpSpeed {
+                                            id,
+                                            jump_speed,
+                                        });
+                                    }
+                                }
+                                _ if parts.len() == 2 => {
+                                    if let (Ok(action), Ok(seq)) =
+                                        (parts[0].parse::<PlayerAction>(), parts[1].parse::<u32>())
+                                    {
+                                        let _ = cmd_sender.send(GameCommand::PlayerAction {
+                                            id,
+                                            seq,
+                                            action,
+                                        });
+                                    }
+                                }
+                                _ => {
+                                    println!("Unknown command!")
                                 }
                             }
                         }
