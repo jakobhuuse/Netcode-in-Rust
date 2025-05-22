@@ -74,81 +74,74 @@ impl Object {
         // Update position with velocity
         self.position = self.position.add(&self.velocity.scale(dt));
     }
-}
 
-/// Returns true if two objects (using their bounding box) overlap
-fn check_collision(a: &Object, b: &Object) -> bool {
-    let a_left = a.position.x - a.width / 2.0;
-    let a_right = a.position.x + a.width / 2.0;
-    let a_bottom = a.position.y - a.height / 2.0;
-    let a_top = a.position.y + a.height / 2.0;
+pub fn resolve_collision(&mut self, other: &Object) -> bool {
+    // Calculate the bounds of both objects (position is center, Y-axis positive UP)
+    let self_left = self.position.x - self.width / 2.0;
+    let self_right = self.position.x + self.width / 2.0;
+    let self_top = self.position.y + self.height / 2.0;
+    let self_bottom = self.position.y - self.height / 2.0;
 
-    let b_left = b.position.x - b.width / 2.0;
-    let b_right = b.position.x + b.width / 2.0;
-    let b_bottom = b.position.y - b.height / 2.0;
-    let b_top = b.position.y + b.height / 2.0;
+    let other_left = other.position.x - other.width / 2.0;
+    let other_right = other.position.x + other.width / 2.0;
+    let other_top = other.position.y + other.height / 2.0;
+    let other_bottom = other.position.y - other.height / 2.0;
+    
+    // Check for collision using AABB (Axis-Aligned Bounding Box) intersection
+    let collision = !(self_right <= other_left
+        || self_left >= other_right
+        || self_bottom >= other_top
+        || self_top <= other_bottom);
 
-    !(a_left > b_right || a_right < b_left || a_top < b_bottom || a_bottom > b_top)
-}
+    if collision {
+        // Calculate overlap amounts (use corrected bounds here)
+        let overlap_x = (self_right.min(other_right) - self_left.max(other_left)).abs();
+        let overlap_y = (self_top.min(other_top) - self_bottom.max(other_bottom)).abs();
 
-pub fn resolve_collision(a: &mut Object, b: &Object) {
-    if check_collision(a, b) {
-        // Calculate overlap on both axes
-        let a_left = a.position.x - a.width / 2.0;
-        let a_right = a.position.x + a.width / 2.0;
-        let a_bottom = a.position.y - a.height / 2.0;
-        let a_top = a.position.y + a.height / 2.0;
-
-        let b_left = b.position.x - b.width / 2.0;
-        let b_right = b.position.x + b.width / 2.0;
-        let b_bottom = b.position.y - b.height / 2.0;
-        let b_top = b.position.y + b.height / 2.0;
-
-        let overlap_x = (a_right.min(b_right)) - (a_left.max(b_left));
-        let overlap_y = (a_top.min(b_top)) - (a_bottom.max(b_bottom));
-
-        // Move player out of collision along the smallest overlap
+        // Determine which axis had the shallowest penetration and resolve along that axis
         if overlap_x < overlap_y {
-            // Resolve X axis
-            if a.position.x < b.position.x {
-                a.position.x -= overlap_x;
+            // Horizontal collision
+            if self.position.x < other.position.x {
+                // Self is to the left of other, move self left
+                self.position.x = other_left - self.width / 2.0;
             } else {
-                a.position.x += overlap_x;
+                // Self is to the right of other, move self right
+                self.position.x = other_right + self.width / 2.0;
             }
-            a.velocity.x = 0.0;
+            // Stop horizontal movement
+            self.velocity.x = 0.0;
+            self.acceleration.x = 0.0;
         } else {
-            // Resolve Y axis
-            if a.position.y < b.position.y && a.velocity.y <= 0.0 {
-                // Landed on top: snap bottom of player to top of platform
-                a.position.y = b.position.y + b.height / 2.0 + a.height / 2.0;
-                a.velocity.y = 0.0;
-            } else if a.position.y > b.position.y {
-                // Hit from below: snap top of player to bottom of platform
-                a.position.y = b.position.y - b.height / 2.0 - a.height / 2.0;
-                a.velocity.y = 0.0;
+            // Vertical collision
+            if self.position.y < other.position.y {
+                self.position.y = other_bottom + self.height / 2.0;
+            } else {
+                self.position.y = other_top + self.height / 2.0;
+            }
+            self.velocity.y = 0.0;
+            if self.velocity.y < 0.0 {
+                 self.acceleration.y = 0.0;
             }
         }
+        true
+    } else {
+        false
     }
 }
 
-/// Checks if the player's object is standing on any static object (ground).
-/// Returns true if grounded, false otherwise.
-pub fn check_grounded(player: &Object, objects: &[Object]) -> bool {
-    let epsilon = 0.01;
-    let player_bottom = player.position.y - player.height / 2.0;
-    for object in objects {
-        if object.is_static {
-            let object_top = object.position.y + object.height / 2.0;
-            let horizontally_overlapping = player.position.x + player.width / 2.0
-                > object.position.x - object.width / 2.0
-                && player.position.x - player.width / 2.0 < object.position.x + object.width / 2.0;
-            if horizontally_overlapping
-                && (player_bottom - object_top).abs() < epsilon
-                && player.velocity.y <= 0.0
-            {
-                return true;
-            }
-        }
-    }
-    false
+    pub fn is_grounded(&self, other: &Object) -> bool {
+    let self_left = self.position.x - self.width / 2.0;
+    let self_right = self.position.x + self.width / 2.0;
+    let self_bottom = self.position.y - self.height / 2.0;
+
+    let other_left = other.position.x - other.width / 2.0;
+    let other_right = other.position.x + other.width / 2.0;
+    let other_top = other.position.y + other.height / 2.0;
+
+    let horizontal_overlap = self_right > other_left && self_left < other_right;
+
+    let vertical_touching = (self_bottom - other_top).abs() < 0.1; // Small tolerance
+
+    horizontal_overlap && vertical_touching && self.position.y > other.position.y
+}
 }

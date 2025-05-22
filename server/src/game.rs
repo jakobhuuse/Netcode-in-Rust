@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::physics::{check_grounded, resolve_collision, Object, Vector2};
+use crate::physics::{Object, Vector2};
 use std::str::FromStr;
 
 #[derive(Serialize)]
@@ -198,10 +198,7 @@ impl GameState {
 
             // Vertical movement
             // Only allow jump if grounded
-            if player.input_state.up
-                && !player.input_state.down
-                && player.grounded
-            {
+            if player.input_state.up && !player.input_state.down && player.grounded {
                 player.object.velocity.y = player.jump_speed;
             } else if !player.input_state.up && player.object.velocity.y > 0.0 {
                 player.object.velocity.y = 0.0;
@@ -210,19 +207,17 @@ impl GameState {
             // Simulate movement
             player.object.simulate(dt);
 
-            // Check and resolve collisions with static objects using AABB Collision Resolution
+            player.grounded = false;
+
+            // Check and resolve collisions
             for object in &self.objects {
-                resolve_collision(&mut player.object, &object);
+                player.object.resolve_collision(object);
+
+                // Check if grounded
+                if player.object.is_grounded(object) {
+                    player.grounded = true;
+                }
             }
-            // Check if the player is grounded
-            player.grounded = check_grounded(&player.object, &self.objects);
-            if player.grounded {
-                player.object.velocity.y = 0.0;
-                player.object.gravity = 0.0;
-            } else {
-                player.object.gravity = 9.81
-            }
-            println!("{}", player.grounded);
         }
         for object in &mut self.objects {
             object.simulate(dt);

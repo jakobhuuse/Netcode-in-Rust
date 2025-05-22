@@ -49,7 +49,6 @@ fn main() {
         }
     });
 
-    game_state.add_static_object(Vector2 { x: 0.0, y: 10.0 }, 30.0, 5.0);
     game_state.add_static_object(Vector2 { x: 0.0, y: -10.0 }, 200.0, 20.0);
     loop {
         // Handle all pending commands from network
