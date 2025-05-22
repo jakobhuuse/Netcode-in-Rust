@@ -1,24 +1,53 @@
+use serde::Serialize;
+
 use crate::physics::{Object, Vector2};
 use std::str::FromStr;
-#[derive(Debug)]
-pub enum PlayerAction {
-    Halt,
-    Left,
-    Right,
-    Jump,
+
+//For returning positions as JSON
+#[derive(Serialize)]
+pub struct PlayerPosition {
+    id: usize,
+    position: Vector2,
 }
 
-impl FromStr for PlayerAction {
+#[derive(Debug, Clone, Default)]
+pub struct PlayerInputState {
+    left: bool,
+    right: bool,
+    up: bool,
+    down: bool,
+    seq: u32,
+}
+
+impl FromStr for PlayerInputState {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "halt" => Ok(PlayerAction::Halt),
-            "left" => Ok(PlayerAction::Left),
-            "right" => Ok(PlayerAction::Right),
-            "jump" => Ok(PlayerAction::Jump),
-            _ => Err(()),
+        let mut left = false;
+        let mut right = false;
+        let mut up = false;
+        let mut down = false;
+        let mut seq = 0;
+
+        //parse input that is in the format "left=1 right=0 ..."
+        for part in s.split_whitespace() {
+            let mut kv = part.split('=');
+            match (kv.next(), kv.next()) {
+                (Some("left"), Some(v)) => left = v == "1",
+                (Some("right"), Some(v)) => right = v == "1",
+                (Some("up"), Some(v)) => up = v == "1",
+                (Some("down"), Some(v)) => down = v == "1",
+                (Some("seq"), Some(v)) => seq = v.parse().unwrap_or(0),
+                _ => {}
+            }
         }
+        Ok(PlayerInputState {
+            left,
+            right,
+            up,
+            down,
+            seq,
+        })
     }
 }
 
@@ -28,6 +57,7 @@ pub struct Player {
     object: Object,
     acceleration_speed: f32,
     jump_speed: f32,
+    input_state: PlayerInputState,
 }
 
 pub struct GameState {
@@ -54,9 +84,10 @@ impl GameState {
         let player = Player {
             id,
             last_seq: 0,
-            object: object,
+            object,
             acceleration_speed: 10.0,
             jump_speed: 20.0,
+            input_state: PlayerInputState::default(),
         };
         self.players.push(player);
     }
@@ -65,10 +96,13 @@ impl GameState {
         self.players.retain(|p| p.id != id);
     }
 
-    pub fn get_player_positions(&self) -> Vec<(usize, Vector2)> {
+    pub fn get_player_positions(&self) -> Vec<PlayerPosition> {
         self.players
             .iter()
-            .map(|p| (p.id, p.object.position))
+            .map(|p| PlayerPosition {
+                id: p.id,
+                position: p.object.position,
+            })
             .collect()
     }
 
@@ -100,43 +134,46 @@ impl GameState {
         }
     }
 
-    pub fn player_action(&mut self, id: usize, action: PlayerAction, seq: u32) {
+    pub fn update_player_input(&mut self, id: usize, input: PlayerInputState) {
         if let Some(player) = self.players.iter_mut().find(|p| p.id == id) {
-            // Only process if seq is newer
-            if seq > player.last_seq {
-                println!(
-                    "Executing action {:?} for player {} (seq {})",
-                    action, id, seq
-                );
-                match action {
-                    PlayerAction::Halt => {
-                        player.object.velocity.x = 0.0;
-                        player.object.acceleration.x = 0.0;
-                    }
-                    PlayerAction::Left => {
-                        player.object.acceleration.x = -player.acceleration_speed;
-                    }
-                    PlayerAction::Right => {
-                        player.object.acceleration.x = player.acceleration_speed;
-                    }
-                    PlayerAction::Jump => {
-                        if player.object.position.y <= 0.0 && player.object.velocity.y <= 0.0 {
-                            player.object.velocity.y = player.jump_speed;
-                        }
-                    }
-                }
-                player.last_seq = seq;
-            } else {
-                println!(
-                    "Ignored out-of-order action for player {}: seq {} (last_seq {})",
-                    id, seq, player.last_seq
-                );
+            // Only update if seq is newer
+            if input.seq > player.last_seq {
+                player.input_state = input.clone();
+                player.last_seq = input.seq;
             }
         }
     }
 
     pub fn update_positions(&mut self, dt: f32) {
         for player in &mut self.players {
+            //Horizontal movement
+            //Left input
+            if player.input_state.left && !player.input_state.right {
+                player.object.acceleration.x = -player.acceleration_speed;
+            //Right input
+            } else if player.input_state.right && !player.input_state.left {
+                player.object.acceleration.x = player.acceleration_speed;
+
+            //No input
+            } else {
+                player.object.acceleration.x = 0.0;
+                player.object.velocity.x = 0.0;
+            }
+
+            //Vertical movement
+            // Jump if on ground and up pressed (and not already moving up)
+            if player.input_state.up
+                && !player.input_state.down
+                && player.object.position.y <= 0.0
+                && player.object.velocity.y <= 0.0
+            {
+                player.object.velocity.y = player.jump_speed;
+            }
+            // Stop moving upward if up is released
+            else if !player.input_state.up && player.object.velocity.y > 0.0 {
+                player.object.velocity.y = 0.0;
+            }
+
             player.object.simulate(dt);
         }
         for object in &mut self.objects {
