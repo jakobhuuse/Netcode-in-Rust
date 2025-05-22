@@ -1,13 +1,26 @@
 use serde::Serialize;
 
-use crate::physics::{Object, Vector2};
+use crate::physics::{check_grounded, resolve_collision, Object, Vector2};
 use std::str::FromStr;
+
+#[derive(Serialize)]
+pub enum ObjectType {
+    Player,
+    Static,
+}
 
 //For returning positions as JSON
 #[derive(Serialize)]
-pub struct PlayerPosition {
-    id: usize,
+pub struct ObjectInfo {
+    object_type: ObjectType,
     position: Vector2,
+    width: f32,
+    height: f32,
+}
+
+#[derive(Serialize)]
+pub struct SeqInfo {
+    last_seq: u32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -57,6 +70,7 @@ pub struct Player {
     object: Object,
     acceleration_speed: f32,
     jump_speed: f32,
+    grounded: bool,
     input_state: PlayerInputState,
 }
 
@@ -75,7 +89,10 @@ impl GameState {
 
     pub fn add_player(&mut self, id: usize) {
         let object = Object {
-            position: Vector2 { x: 0.0, y: 0.0 },
+            is_static: false,
+            width: 5.0,
+            height: 5.0,
+            position: Vector2 { x: 0.0, y: 10.0 },
             velocity: Vector2 { x: 0.0, y: 0.0 },
             acceleration: Vector2 { x: 0.0, y: 0.0 },
             max_speed: 10.0,
@@ -87,6 +104,7 @@ impl GameState {
             object,
             acceleration_speed: 10.0,
             jump_speed: 20.0,
+            grounded: false,
             input_state: PlayerInputState::default(),
         };
         self.players.push(player);
@@ -96,18 +114,40 @@ impl GameState {
         self.players.retain(|p| p.id != id);
     }
 
-    pub fn get_player_positions(&self) -> Vec<PlayerPosition> {
-        self.players
+    pub fn get_object_positions(&self) -> Vec<ObjectInfo> {
+        let mut result: Vec<ObjectInfo> = self
+            .objects
             .iter()
-            .map(|p| PlayerPosition {
-                id: p.id,
-                position: p.object.position,
+            .map(|o| ObjectInfo {
+                object_type: ObjectType::Static,
+                position: o.position,
+                width: o.width,
+                height: o.height,
             })
-            .collect()
+            .collect();
+
+        result.extend(self.players.iter().map(|p| ObjectInfo {
+            object_type: ObjectType::Player,
+            position: p.object.position,
+            width: p.object.width,
+            height: p.object.height,
+        }));
+
+        result
     }
 
-    pub fn get_player_seqs(&self) -> Vec<(usize, u32)> {
-        self.players.iter().map(|p| (p.id, p.last_seq)).collect()
+    pub fn get_player_seqs(&self) -> Vec<(usize, SeqInfo)> {
+        self.players
+            .iter()
+            .map(|p| {
+                (
+                    p.id,
+                    SeqInfo {
+                        last_seq: p.last_seq,
+                    },
+                )
+            })
+            .collect()
     }
 
     pub fn set_player_max_speed(&mut self, id: usize, speed: f32) {
@@ -146,38 +186,60 @@ impl GameState {
 
     pub fn update_positions(&mut self, dt: f32) {
         for player in &mut self.players {
-            //Horizontal movement
-            //Left input
+            // Horizontal movement
             if player.input_state.left && !player.input_state.right {
                 player.object.acceleration.x = -player.acceleration_speed;
-            //Right input
             } else if player.input_state.right && !player.input_state.left {
                 player.object.acceleration.x = player.acceleration_speed;
-
-            //No input
             } else {
                 player.object.acceleration.x = 0.0;
                 player.object.velocity.x = 0.0;
             }
 
-            //Vertical movement
-            // Jump if on ground and up pressed (and not already moving up)
+            // Vertical movement
+            // Only allow jump if grounded
             if player.input_state.up
                 && !player.input_state.down
-                && player.object.position.y <= 0.0
-                && player.object.velocity.y <= 0.0
+                && player.grounded
             {
                 player.object.velocity.y = player.jump_speed;
-            }
-            // Stop moving upward if up is released
-            else if !player.input_state.up && player.object.velocity.y > 0.0 {
+            } else if !player.input_state.up && player.object.velocity.y > 0.0 {
                 player.object.velocity.y = 0.0;
             }
 
+            // Simulate movement
             player.object.simulate(dt);
+
+            // Check and resolve collisions with static objects using AABB Collision Resolution
+            for object in &self.objects {
+                resolve_collision(&mut player.object, &object);
+            }
+            // Check if the player is grounded
+            player.grounded = check_grounded(&player.object, &self.objects);
+            if player.grounded {
+                player.object.velocity.y = 0.0;
+                player.object.gravity = 0.0;
+            } else {
+                player.object.gravity = 9.81
+            }
+            println!("{}", player.grounded);
         }
         for object in &mut self.objects {
             object.simulate(dt);
         }
+    }
+
+    pub fn add_static_object(&mut self, position: Vector2, width: f32, height: f32) {
+        let object = Object {
+            is_static: true,
+            width: width,
+            height: height,
+            position,
+            velocity: Vector2 { x: 0.0, y: 0.0 },
+            acceleration: Vector2 { x: 0.0, y: 0.0 },
+            max_speed: 0.0,
+            gravity: 0.0,
+        };
+        self.objects.push(object);
     }
 }
