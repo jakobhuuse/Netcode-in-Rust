@@ -1,20 +1,23 @@
 use std::{
     collections::HashMap,
-    io::{Read, Write},
-    net::{TcpListener, TcpStream},
+    io::Error,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc::Sender,
-        Arc, Mutex,
+        Arc,
     },
-    thread,
 };
 
 use crate::game::PlayerInputState;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use sha1::{Digest, Sha1};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
+    sync::{mpsc, RwLock},
+};
 
-type ClientMap = Arc<Mutex<HashMap<usize, TcpStream>>>;
+// Type alias for the client map, now storing Senders of Vec<u8>
+type ClientMap = Arc<RwLock<HashMap<usize, mpsc::Sender<Vec<u8>>>>>; // MODIFIED: Vec<u8>
 
 /// GameCommand enum for handling game-related commands
 pub enum GameCommand {
@@ -27,7 +30,7 @@ pub enum GameCommand {
     PlayerInput { id: usize, input: PlayerInputState },
 }
 
-/// A simple WebSocket server implementation
+/// A simple async WebSocket server implementation
 pub struct NetworkServer {
     addr: String,
     clients: ClientMap,
@@ -39,31 +42,36 @@ impl NetworkServer {
     pub fn new(addr: &str) -> Self {
         NetworkServer {
             addr: addr.to_string(),
-            clients: Arc::new(Mutex::new(HashMap::new())),
+            clients: Arc::new(RwLock::new(HashMap::new())),
             next_id: AtomicUsize::new(0),
         }
     }
 
-    /// Start the WebSocket server with a channel for game commands
-    pub fn start(&self, cmd_sender: Sender<GameCommand>) -> Result<(), std::io::Error> {
-        let listener = TcpListener::bind(&self.addr)?;
+    /// Start the async WebSocket server with a channel for game commands
+    pub async fn start(&self, cmd_sender: mpsc::Sender<GameCommand>) -> Result<(), Error> {
+        let listener = TcpListener::bind(&self.addr).await?;
         println!("WebSocket server listening on ws://{}", self.addr);
 
-        for stream in listener.incoming() {
-            match stream {
-                Ok(stream) => {
-                    let clients = Arc::clone(&self.clients);
+        loop {
+            match listener.accept().await {
+                Ok((stream, addr)) => {
+                    println!("New connection from: {}", addr);
                     let id = self.next_id.fetch_add(1, Ordering::Relaxed);
 
-                    clients
-                        .lock()
-                        .unwrap()
-                        .insert(id, stream.try_clone().unwrap());
+                    // Create a channel for sending messages
+                    let (client_sender, client_receiver) = mpsc::channel::<Vec<u8>>(100);
+
+                    // Store the sender in the clients map
+                    self.clients.write().await.insert(id, client_sender);
 
                     let server_ref = self.clone_refs();
                     let cmd_sender_clone = cmd_sender.clone();
-                    thread::spawn(move || {
-                        server_ref.handle_client(stream, id, cmd_sender_clone);
+
+                    // Spawn a new task for each client
+                    tokio::spawn(async move {
+                        server_ref
+                            .handle_client(stream, id, cmd_sender_clone, client_receiver)
+                            .await;
                     });
                 }
                 Err(e) => {
@@ -71,7 +79,6 @@ impl NetworkServer {
                 }
             }
         }
-        Ok(())
     }
 
     /// Create a lightweight clone containing only reference-counted fields
@@ -83,138 +90,220 @@ impl NetworkServer {
         }
     }
 
-    /// Broadcast a message to all connected clients except the sender
-    pub fn broadcast_message(&self, message: &str) {
+    /// Broadcast a message to all connected clients asynchronously
+    pub async fn broadcast_message(&self, message: &str) {
+        // create_websocket_frame already returns Vec<u8>
         let frame = self.create_websocket_frame(message.to_string());
-        let clients = self.clients.lock().unwrap();
+        let clients = self.clients.read().await;
 
-        for (&id, stream) in clients.iter() {
-            if let Err(e) = stream.try_clone().unwrap().write_all(&frame) {
-                eprintln!("Failed to send to client {}: {}", id, e);
-            }
+        // Collect all client tasks to run concurrently
+        let mut send_tasks = Vec::new();
+
+        for (&id, client_sender) in clients.iter() {
+            let frame_clone = frame.clone();
+            let client_sender_clone = client_sender.clone();
+
+            let task = tokio::spawn(async move {
+                if let Err(e) = client_sender_clone.send(frame_clone).await {
+                    eprintln!("Failed to send message to client {} via channel: {}", id, e);
+                }
+            });
+
+            send_tasks.push(task);
+        }
+
+        for task in send_tasks {
+            let _ = task.await;
         }
     }
 
-    /// Send a message to a specific client by id
-    pub fn send_message_to_client(&self, id: usize, message: &str) {
+    /// Send a message to a specific client by id asynchronously
+    pub async fn send_message_to_client(&self, id: usize, message: &str) {
         let frame = self.create_websocket_frame(message.to_string());
-        let clients = self.clients.lock().unwrap();
-        if let Some(stream) = clients.get(&id) {
-            // Try to clone the stream to avoid locking issues
-            if let Ok(mut stream) = stream.try_clone() {
-                if let Err(e) = stream.write_all(&frame) {
-                    eprintln!("Failed to send to client {}: {}", id, e);
-                }
+        let clients = self.clients.read().await;
+
+        if let Some(client_sender) = clients.get(&id) {
+            // Send the raw byte vector directly
+            if let Err(e) = client_sender.send(frame).await {
+                eprintln!("Failed to send message to client {} via channel: {}", id, e);
             }
         }
     }
 
     /// Handle an individual client connection with a channel for game commands
-    fn handle_client(&self, mut stream: TcpStream, id: usize, cmd_sender: Sender<GameCommand>) {
+    async fn handle_client(
+        &self,
+        mut stream: TcpStream,
+        id: usize,
+        cmd_sender: mpsc::Sender<GameCommand>,
+        mut client_receiver: mpsc::Receiver<Vec<u8>>,
+    ) {
         let mut buffer = [0; 1024];
 
-        if let Ok(size) = stream.read(&mut buffer) {
-            let request = String::from_utf8_lossy(&buffer[..size]);
+        // Perform WebSocket handshake
+        let handshake_success = {
+            match stream.read(&mut buffer).await {
+                Ok(size) => {
+                    let request = String::from_utf8_lossy(&buffer[..size]);
 
-            if let Some(key) = self.extract_websocket_key(&request) {
-                let accept_key = self.generate_accept_key(&key);
-                let response = format!(
-                    "HTTP/1.1 101 Switching Protocols\r\n\
-                     Upgrade: websocket\r\n\
-                     Connection: Upgrade\r\n\
-                     Sec-WebSocket-Accept: {}\r\n\r\n",
-                    accept_key
-                );
+                    if let Some(key) = self.extract_websocket_key(&request) {
+                        let accept_key = self.generate_accept_key(&key);
+                        let response = format!(
+                            "HTTP/1.1 101 Switching Protocols\r\n\
+                             Upgrade: websocket\r\n\
+                             Connection: Upgrade\r\n\
+                             Sec-WebSocket-Accept: {}\r\n\r\n",
+                            accept_key
+                        );
 
-                stream.write_all(response.as_bytes()).unwrap();
-                println!("Handshake completed for client {}!", id);
+                        match stream.write_all(response.as_bytes()).await {
+                            Ok(_) => {
+                                println!("Handshake completed for client {}!", id);
+                                true
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to complete handshake for client {}: {}", id, e);
+                                false
+                            }
+                        }
+                    } else {
+                        eprintln!("Invalid WebSocket handshake from client {}", id);
+                        false
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to read handshake from client {}: {}", id, e);
+                    false
+                }
+            }
+        };
 
-                let _ = cmd_sender.send(GameCommand::AddPlayer { id });
+        if !handshake_success {
+            self.cleanup_client(id).await;
+            return;
+        }
 
-                loop {
-                    let mut frame = [0; 1024];
-                    match stream.read(&mut frame) {
+        // Notify game that player joined
+        let _ = cmd_sender.send(GameCommand::AddPlayer { id }).await;
+
+        // Main client loop
+        loop {
+            let mut frame = [0; 1024];
+            tokio::select! {
+                // Select between reading from stream and receiving internal messages
+                read_result = stream.read(&mut frame) => {
+                    match read_result {
                         Ok(size) if size == 0 => {
                             println!("Client {} disconnected abruptly.", id);
-                            self.clients.lock().unwrap().remove(&id);
-                            let _ = cmd_sender.send(GameCommand::RemovePlayer { id });
+                            self.cleanup_client(id).await;
+                            let _ = cmd_sender.send(GameCommand::RemovePlayer { id }).await;
                             break;
                         }
                         Ok(size) => {
                             let opcode = frame[0] & 0x0F;
 
                             if opcode == 0x8 {
-                                println!(
-                                    "Client {} sent close frame. Sending close response...",
-                                    id
-                                );
-                                self.clients.lock().unwrap().remove(&id);
-                                let _ = cmd_sender.send(GameCommand::RemovePlayer { id });
+                                println!("Client {} sent close frame. Sending close response...", id);
+
+                                // Send close response
                                 let close_frame = vec![0x88, 0x00];
-                                stream.write_all(&close_frame).unwrap();
+                                let _ = stream.write_all(&close_frame).await;
+
+                                self.cleanup_client(id).await;
+                                let _ = cmd_sender.send(GameCommand::RemovePlayer { id }).await;
                                 break;
                             }
 
                             let message = self.parse_websocket_frame(&frame[..size]).to_lowercase();
                             println!("Received from client {}: {}", id, message);
 
-                            let parts: Vec<&str> = message.split_whitespace().collect();
-                            if parts.is_empty() {
-                                continue;
-                            }
-                            match parts[0] {
-                                "set_gravity" if parts.len() == 2 => {
-                                    if let Ok(gravity) = parts[1].parse::<f32>() {
-                                        let _ = cmd_sender
-                                            .send(GameCommand::SetPlayerGravity { id, gravity });
-                                    }
-                                }
-                                "set_max_speed" if parts.len() == 2 => {
-                                    if let Ok(max_speed) = parts[1].parse::<f32>() {
-                                        let _ = cmd_sender
-                                            .send(GameCommand::SetPlayerMaxSpeed { id, max_speed });
-                                    }
-                                }
-                                "set_acceleration_speed" if parts.len() == 2 => {
-                                    if let Ok(acceleration_speed) = parts[1].parse::<f32>() {
-                                        let _ = cmd_sender.send(
-                                            GameCommand::SetPlayerAccelerationSpeed {
-                                                id,
-                                                acceleration_speed,
-                                            },
-                                        );
-                                    }
-                                }
-                                "set_jump_speed" if parts.len() == 2 => {
-                                    if let Ok(jump_speed) = parts[1].parse::<f32>() {
-                                        let _ = cmd_sender.send(GameCommand::SetPlayerJumpSpeed {
-                                            id,
-                                            jump_speed,
-                                        });
-                                    }
-                                }
-
-                                _ if parts.iter().any(|p| p.contains('=')) => {
-                                    if let Ok(input) = message.parse::<PlayerInputState>() {
-                                        let _ =
-                                            cmd_sender.send(GameCommand::PlayerInput { id, input });
-                                    }
-                                }
-                                _ => {
-                                    println!("Unknown command!")
-                                }
-                            }
+                            self.process_client_message(&message, id, &cmd_sender).await;
                         }
-                        Err(_) => {
-                            println!("Error reading from client {}. Disconnecting...", id);
-                            self.clients.lock().unwrap().remove(&id);
-                            let _ = cmd_sender.send(GameCommand::RemovePlayer { id });
+                        Err(e) => {
+                            eprintln!("Error reading from client {}: {}", id, e);
+                            self.cleanup_client(id).await;
+                            let _ = cmd_sender.send(GameCommand::RemovePlayer { id }).await;
                             break;
                         }
                     }
+                },
+                // Handle messages from the game loop
+                Some(frame_to_send) = client_receiver.recv() => {
+                    if let Err(e) = stream.write_all(&frame_to_send).await {
+                        eprintln!("Failed to send outgoing message to client {}: {}", id, e);
+                        self.cleanup_client(id).await;
+                        let _ = cmd_sender.send(GameCommand::RemovePlayer { id }).await;
+                        break;
+                    }
+                },
+                else => {
+                    break;
                 }
             }
         }
+    }
+
+    /// Process a message from a client and send appropriate game commands
+    async fn process_client_message(
+        &self,
+        message: &str,
+        id: usize,
+        cmd_sender: &mpsc::Sender<GameCommand>,
+    ) {
+        let parts: Vec<&str> = message.split_whitespace().collect();
+        if parts.is_empty() {
+            return;
+        }
+
+        match parts[0] {
+            "set_gravity" if parts.len() == 2 => {
+                if let Ok(gravity) = parts[1].parse::<f32>() {
+                    let _ = cmd_sender
+                        .send(GameCommand::SetPlayerGravity { id, gravity })
+                        .await;
+                }
+            }
+            "set_max_speed" if parts.len() == 2 => {
+                if let Ok(max_speed) = parts[1].parse::<f32>() {
+                    let _ = cmd_sender
+                        .send(GameCommand::SetPlayerMaxSpeed { id, max_speed })
+                        .await;
+                }
+            }
+            "set_acceleration_speed" if parts.len() == 2 => {
+                if let Ok(acceleration_speed) = parts[1].parse::<f32>() {
+                    let _ = cmd_sender
+                        .send(GameCommand::SetPlayerAccelerationSpeed {
+                            id,
+                            acceleration_speed,
+                        })
+                        .await;
+                }
+            }
+            "set_jump_speed" if parts.len() == 2 => {
+                if let Ok(jump_speed) = parts[1].parse::<f32>() {
+                    let _ = cmd_sender
+                        .send(GameCommand::SetPlayerJumpSpeed { id, jump_speed })
+                        .await;
+                }
+            }
+            _ if parts.iter().any(|p| p.contains('=')) => {
+                if let Ok(input) = message.parse::<PlayerInputState>() {
+                    let _ = cmd_sender
+                        .send(GameCommand::PlayerInput { id, input })
+                        .await;
+                }
+            }
+            _ => {
+                println!("Unknown command from client {}: {}", id, message);
+            }
+        }
+    }
+
+    /// Clean up a disconnected client
+    async fn cleanup_client(&self, id: usize) {
+        let mut clients = self.clients.write().await;
+        clients.remove(&id);
     }
 
     /// Create a WebSocket frame from a message
@@ -224,10 +313,16 @@ impl NetworkServer {
 
         if payload.len() < 126 {
             frame.push(payload.len() as u8);
-        } else {
+        } else if payload.len() < 65536 {
             frame.push(126);
             frame.push(((payload.len() >> 8) & 0xFF) as u8);
             frame.push((payload.len() & 0xFF) as u8);
+        } else {
+            frame.push(127);
+            let len = payload.len() as u64;
+            for i in (0..8).rev() {
+                frame.push(((len >> (i * 8)) & 0xFF) as u8);
+            }
         }
 
         frame.extend_from_slice(payload);
@@ -236,9 +331,40 @@ impl NetworkServer {
 
     /// Parse a WebSocket frame into a string message
     fn parse_websocket_frame(&self, frame: &[u8]) -> String {
+        if frame.len() < 6 {
+            return String::new();
+        }
+
         let payload_length = (frame[1] & 127) as usize;
-        let mask_key = &frame[2..6];
-        let payload = &frame[6..6 + payload_length];
+
+        // Handle different payload length encodings
+        let (actual_length, payload_start) = if payload_length < 126 {
+            (payload_length, 6)
+        } else if payload_length == 126 {
+            if frame.len() < 8 {
+                return String::new();
+            }
+            let len = ((frame[2] as usize) << 8) | (frame[3] as usize);
+            (len, 8)
+        } else {
+            // payload_length == 127, 64-bit length
+            if frame.len() < 14 {
+                return String::new();
+            }
+            // For simplicity, we'll assume the length fits in a usize
+            let len = ((frame[6] as usize) << 24)
+                | ((frame[7] as usize) << 16)
+                | ((frame[8] as usize) << 8)
+                | (frame[9] as usize);
+            (len, 14)
+        };
+
+        if frame.len() < payload_start + actual_length {
+            return String::new();
+        }
+
+        let mask_key = &frame[payload_start - 4..payload_start];
+        let payload = &frame[payload_start..payload_start + actual_length];
 
         let decoded: Vec<u8> = payload
             .iter()
