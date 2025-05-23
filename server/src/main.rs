@@ -49,7 +49,7 @@ fn main() {
         }
     });
 
-    game_state.add_static_object(Vector2 { x: 0.0, y: -10.0 }, 200.0, 20.0);
+    game_state.add_object(Vector2 { x: 0.0, y: -7.5 }, 200.0, 10.0);
     loop {
         // Handle all pending commands from network
         while let Ok(cmd) = cmd_reciver.try_recv() {
@@ -80,18 +80,17 @@ fn main() {
                 }
             }
         }
-
+        // Process the player input
+        game_state.process_input();
         // Update the gamestate
         game_state.update_positions(tick_interval.as_secs_f32());
 
-        for (id, seq) in game_state.get_player_seqs() {
+        for (id, seq) in game_state.get_players_last_seqs() {
             server.send_message_to_client(id, &serde_json::to_string(&seq).unwrap());
         }
 
-        // Broadcast gamestate
-        let positions = game_state.get_object_positions();
-        let msg = serde_json::to_string(&positions).unwrap();
-        server.broadcast_message(&msg);
+        // Gets the objects in the gamestate, serializes, then broadcasts them.
+        server.broadcast_message(&serde_json::to_string(&game_state.get_objects()).unwrap());
 
         // Sleep game-thread
         thread::sleep(tick_interval);
