@@ -1,3 +1,12 @@
+//! Client-side network implementation for real-time multiplayer game
+//! 
+//! This module implements the client's network layer, handling:
+//! - UDP connection management with timeout detection
+//! - Artificial latency simulation for testing netcode
+//! - Packet serialization and queuing for delayed transmission
+//! - Integration with client-side prediction, reconciliation, and interpolation
+//! - Input transmission with sequence numbering for reliability
+
 use crate::game::{ClientGameState, ServerStateConfig};
 use crate::input::InputManager;
 use crate::rendering::{RenderConfig, Renderer};
@@ -9,34 +18,59 @@ use std::collections::VecDeque;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
+/// Main client structure managing network communication and game state
+/// 
+/// The client handles all networking responsibilities including:
+/// - Maintaining UDP connection to game server
+/// - Managing artificial latency for testing network conditions
+/// - Coordinating input, prediction, and rendering systems
+/// - Tracking connection health and implementing reconnection logic
+/// Main client structure managing network communication and game state
+/// 
+/// The client handles all networking responsibilities including:
+/// - Maintaining UDP connection to game server
+/// - Managing artificial latency for testing network conditions
+/// - Coordinating input, prediction, and rendering systems
+/// - Tracking connection health and implementing reconnection logic
 pub struct Client {
+    // Network components
     socket: UdpSocket,
     server_addr: SocketAddr,
     client_id: Option<u32>,
     connected: bool,
 
+    // Game systems
     game_state: ClientGameState,
     input_manager: InputManager,
     renderer: Renderer,
 
+    // Connection monitoring
     ping_ms: u64,
-    fake_ping_ms: u64,
+    fake_ping_ms: u64,                    // Artificial latency for testing
     last_packet_received: Instant,
     connection_timeout: Duration,
 
-    outgoing_packets: VecDeque<(Vec<u8>, Instant)>,
-    incoming_packets: VecDeque<(Packet, Instant, Instant)>,
+    // Packet queuing for artificial latency simulation
+    outgoing_packets: VecDeque<(Vec<u8>, Instant)>,     // (data, send_time)
+    incoming_packets: VecDeque<(Packet, Instant, Instant)>, // (packet, process_time, receive_time)
 
+    // Netcode feature toggles
     prediction_enabled: bool,
     reconciliation_enabled: bool,
     interpolation_enabled: bool,
 }
 
 impl Client {
+    /// Creates a new client instance with specified server address and artificial latency
+    /// 
+    /// Sets up UDP socket, initializes game systems, and configures netcode features.
+    /// The fake_ping_ms parameter allows testing network conditions by artificially
+    /// delaying packet transmission and processing.
     pub async fn new(
         server_addr: &str,
         fake_ping_ms: u64,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        // Bind to any available port for client socket
         let socket = UdpSocket::bind("0.0.0.0:0")?;
         socket.set_nonblocking(true)?;
         let server_addr = server_addr.parse()?;
@@ -57,12 +91,17 @@ impl Client {
             connection_timeout: Duration::from_secs(5),
             outgoing_packets: VecDeque::new(),
             incoming_packets: VecDeque::new(),
+            // Enable all netcode features by default
             prediction_enabled: true,
             reconciliation_enabled: true,
             interpolation_enabled: true,
         })
     }
 
+    /// Initiates connection to the game server
+    /// 
+    /// Sends initial connection packet with client version information.
+    /// The server will respond with a Connected packet containing the assigned client ID.
     async fn connect(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         info!("Connecting to server...");
 
@@ -72,26 +111,40 @@ impl Client {
         Ok(())
     }
 
+    /// Attempts to reconnect to the server after connection loss
+    /// 
+    /// Performs clean disconnection if still connected, resets client state,
+    /// and initiates a fresh connection. Used for both manual reconnection
+    /// and automatic recovery from connection timeouts.
     pub async fn reconnect(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         info!("Attempting to reconnect...");
 
+        // Clean disconnect if still connected
         if self.connected {
             let _ = self.send_packet(&Packet::Disconnect).await;
             std::thread::sleep(Duration::from_millis(100));
         }
 
+        // Reset client state for fresh connection
         self.connected = false;
         self.client_id = None;
         self.last_packet_received = Instant::now();
 
+        // Clear packet queues to avoid stale data
         self.outgoing_packets.clear();
         self.incoming_packets.clear();
 
+        // Reset game state for clean reconnection
         self.game_state = ClientGameState::new();
 
         self.connect().await
     }
 
+    /// Monitors connection health and detects timeouts
+    /// 
+    /// Checks if too much time has passed since the last received packet.
+    /// Marks the client as disconnected if the timeout threshold is exceeded,
+    /// allowing the main loop to handle reconnection logic.
     fn check_connection_health(&mut self) {
         if self.connected && self.last_packet_received.elapsed() > self.connection_timeout {
             warn!("Connection timeout detected, marking as disconnected");
@@ -100,20 +153,32 @@ impl Client {
         }
     }
 
+    /// Sends a packet to the server with optional artificial latency
+    /// 
+    /// Serializes the packet and either sends immediately or queues for delayed
+    /// transmission if artificial latency is enabled. This allows testing of
+    /// netcode behavior under various network conditions.
     async fn send_packet(&mut self, packet: &Packet) -> Result<(), Box<dyn std::error::Error>> {
         let data = serialize(packet)?;
 
         if self.fake_ping_ms > 0 {
+            // Simulate one-way latency (half of round-trip time)
             let delay_ms = self.fake_ping_ms / 2;
             let send_time = Instant::now() + Duration::from_millis(delay_ms);
             self.outgoing_packets.push_back((data, send_time));
         } else {
+            // Send immediately for real network conditions
             self.socket.send_to(&data, self.server_addr)?;
         }
 
         Ok(())
     }
 
+    /// Processes queued outgoing packets for artificial latency simulation
+    /// 
+    /// Checks if any queued packets are ready to be sent based on their
+    /// scheduled transmission time. This simulates network delay by holding
+    /// packets until the artificial latency period has elapsed.
     fn process_outgoing_packets(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
         while let Some((_data, send_time)) = self.outgoing_packets.front() {
@@ -127,6 +192,11 @@ impl Client {
         Ok(())
     }
 
+    /// Processes queued incoming packets for artificial latency simulation
+    /// 
+    /// Handles packets that have been delayed to simulate network latency.
+    /// Packets are processed when their scheduled processing time is reached,
+    /// maintaining the artificial delay for realistic netcode testing.
     fn process_incoming_packets(&mut self) {
         let now = Instant::now();
         while let Some((_packet, process_time, _receive_time)) = self.incoming_packets.front() {
@@ -139,7 +209,16 @@ impl Client {
         }
     }
 
+    /// Handles incoming packets from the server
+    /// 
+    /// Processes different packet types and updates client state accordingly:
+    /// - Connected: Establishes client ID and connection status
+    /// - GameState: Updates game simulation and triggers netcode features
+    /// - Disconnected: Handles server-initiated disconnection
+    /// 
+    /// Also calculates ping time and updates connection health tracking.
     fn handle_packet_sync(&mut self, packet: Packet, _receive_time: Instant) {
+        // Update connection health tracking
         self.last_packet_received = Instant::now();
 
         match packet {
@@ -160,20 +239,25 @@ impl Client {
                     .unwrap_or(Duration::from_secs(0))
                     .as_millis() as u64;
 
+                // Calculate ping time for display and netcode tuning
                 if timestamp > 0 {
                     if self.fake_ping_ms > 0 {
+                        // Use artificial ping for consistent testing
                         self.ping_ms = self.fake_ping_ms;
                     } else {
+                        // Calculate real round-trip time
                         self.ping_ms = now.saturating_sub(timestamp);
                     }
                 }
 
+                // Configure server state processing based on enabled features
                 let config = ServerStateConfig {
                     client_id: self.client_id,
                     reconciliation_enabled: self.reconciliation_enabled,
                     interpolation_enabled: self.interpolation_enabled,
                 };
 
+                // Apply authoritative server state and perform netcode processing
                 self.game_state.apply_server_state(
                     tick,
                     timestamp,
@@ -195,11 +279,18 @@ impl Client {
         }
     }
 
+    /// Sends player input to the server and applies client-side prediction
+    /// 
+    /// Transmits input state with sequence numbering for reliability and
+    /// acknowledgment tracking. If prediction is enabled, immediately applies
+    /// the input locally for responsive gameplay while waiting for server
+    /// confirmation and potential reconciliation.
     async fn send_input(&mut self, input: InputState) -> Result<(), Box<dyn std::error::Error>> {
         if !self.connected || self.client_id.is_none() {
             return Ok(());
         }
 
+        // Serialize input for network transmission
         let packet = Packet::Input {
             sequence: input.sequence,
             timestamp: input.timestamp,
@@ -210,6 +301,7 @@ impl Client {
 
         self.send_packet(&packet).await?;
 
+        // Apply client-side prediction for immediate response
         if self.prediction_enabled {
             if let Some(client_id) = self.client_id {
                 self.game_state.apply_prediction(client_id, &input);
@@ -219,6 +311,11 @@ impl Client {
         Ok(())
     }
 
+    /// Handles runtime toggle of netcode features via keyboard input
+    /// 
+    /// Allows dynamic enable/disable of prediction, reconciliation, interpolation,
+    /// and manual reconnection during gameplay for testing and demonstration.
+    /// Returns true if reconnection was requested.
     fn handle_toggles(&mut self, toggles: (bool, bool, bool, bool)) -> bool {
         let mut reconnect_requested = false;
 
@@ -242,31 +339,46 @@ impl Client {
         reconnect_requested
     }
 
+    /// Main client game loop handling network, input, and rendering
+    /// 
+    /// Orchestrates the complete client-side game experience:
+    /// 1. Network: Processes incoming/outgoing packets with artificial latency
+    /// 2. Input: Captures player input and sends to server at 60Hz
+    /// 3. Physics: Updates game simulation with fixed timesteps
+    /// 4. Rendering: Displays game state with appropriate netcode visualization
+    /// 
+    /// The loop runs at 60 FPS with separate timing for input sampling and rendering
+    /// to ensure consistent gameplay regardless of frame rate variations.
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         self.connect().await?;
 
+        // Timing control for consistent update rates
         let mut last_input_time = Instant::now();
         let mut last_render_time = Instant::now();
-        let input_interval = Duration::from_millis(16);
-        let render_interval = Duration::from_millis(16);
+        let input_interval = Duration::from_millis(16);   // 60Hz input sampling
+        let render_interval = Duration::from_millis(16);   // 60 FPS rendering
 
         let mut buffer = [0u8; 2048];
 
         loop {
+            // Process outgoing packets with artificial delay
             if let Err(e) = self.process_outgoing_packets() {
                 error!("Error processing outgoing packets: {}", e);
             }
 
+            // Receive and queue incoming packets
             match self.socket.recv_from(&mut buffer) {
                 Ok((len, _)) => {
                     let receive_time = Instant::now();
                     if let Ok(packet) = deserialize::<Packet>(&buffer[0..len]) {
                         if self.fake_ping_ms > 0 {
+                            // Queue packet for delayed processing
                             let delay_ms = self.fake_ping_ms / 2;
                             let process_time = receive_time + Duration::from_millis(delay_ms);
                             self.incoming_packets
                                 .push_back((packet, process_time, receive_time));
                         } else {
+                            // Process immediately for real network
                             self.handle_packet_sync(packet, receive_time);
                         }
                     }
@@ -277,8 +389,10 @@ impl Client {
                 }
             }
 
+            // Process delayed incoming packets
             self.process_incoming_packets();
 
+            // Input processing at consistent 60Hz rate
             if last_input_time.elapsed() >= input_interval {
                 let (toggles, input_to_send) = self.input_manager.update();
 
@@ -300,18 +414,22 @@ impl Client {
 
             self.check_connection_health();
 
+            // Rendering at consistent 60 FPS
             if last_render_time.elapsed() >= render_interval {
+                // Update physics only if prediction is disabled
                 if !self.prediction_enabled {
                     let dt = 1.0 / 60.0;
                     self.game_state.update_physics(dt);
                 }
 
+                // Get appropriate player positions based on netcode configuration
                 let players = self.game_state.get_render_players(
                     self.client_id,
                     self.prediction_enabled,
                     self.interpolation_enabled,
                 );
 
+                // Configure rendering with current netcode state
                 let render_config = RenderConfig {
                     client_id: self.client_id,
                     prediction_enabled: self.prediction_enabled,
@@ -329,11 +447,13 @@ impl Client {
 
             self.check_connection_health();
 
+            // Handle application quit
             if is_quit_requested() {
                 break;
             }
         }
 
+        // Clean disconnect when exiting
         if self.connected {
             let _ = self.send_packet(&Packet::Disconnect).await;
         }
