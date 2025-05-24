@@ -671,3 +671,47 @@ fn get_current_timestamp() -> u64 {
         .unwrap_or(Duration::from_secs(0))
         .as_millis() as u64
 }
+
+/// Tests that verify address resolution functionality for both IP addresses and domain names
+#[cfg(test)]
+mod address_resolution_tests {
+    use client::network::Client;
+
+    #[tokio::test]
+    async fn test_client_creation_with_ip_addresses() {
+        // Test IPv4
+        let result = Client::new("127.0.0.1:8080", 0).await;
+        assert!(
+            result.is_ok(),
+            "Should be able to create client with IPv4 address"
+        );
+
+        // Test IPv6
+        let result = Client::new("[::1]:8080", 0).await;
+        assert!(
+            result.is_ok(),
+            "Should be able to create client with IPv6 address"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_client_creation_with_domain_names() {
+        // Test localhost
+        let result = Client::new("localhost:8080", 0).await;
+        assert!(
+            result.is_ok(),
+            "Should be able to create client with localhost domain"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_client_creation_with_invalid_addresses() {
+        // Test invalid format
+        let result = Client::new("invalid-format", 0).await;
+        assert!(result.is_err(), "Should fail with invalid address format");
+
+        // Test non-existent domain
+        let result = Client::new("definitely-nonexistent-domain-12345.invalid:8080", 0).await;
+        assert!(result.is_err(), "Should fail with non-existent domain");
+    }
+}
