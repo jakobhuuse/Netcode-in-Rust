@@ -82,48 +82,36 @@
 //!
 //! ## Usage Example
 //!
-//! ```rust
-//! use server::*;
+//! ```rust,no_run
+//! use server::network::Server;
+//! use std::time::Duration;
 //!
-//! // Initialize server components
-//! let mut game = game::GameState::new();
-//! let mut client_manager = client_manager::ClientManager::new();
-//! let mut network = network::NetworkServer::bind("0.0.0.0:8080")?;
-//!
-//! // Main server loop
-//! loop {
-//!     // Process incoming network packets
-//!     while let Some((packet, addr)) = network.receive_packet()? {
-//!         match packet {
-//!             Packet::Connect { .. } => {
-//!                 if let Some(client_id) = client_manager.accept_client(addr) {
-//!                     network.send_connected(addr, client_id)?;
-//!                 }
-//!             }
-//!             Packet::Input { .. } => {
-//!                 client_manager.queue_input(addr, packet);
-//!             }
-//!             Packet::Disconnect => {
-//!                 client_manager.disconnect_client(addr);
-//!             }
-//!         }
-//!     }
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Create a new server bound to address with 60Hz tick rate and max 32 clients
+//!     let mut server = Server::new(
+//!         "127.0.0.1:8080",
+//!         Duration::from_millis(16), // 60Hz = ~16.67ms per tick
+//!         32
+//!     ).await?;
 //!     
-//!     // Process all queued inputs
-//!     for input in client_manager.drain_inputs() {
-//!         game.apply_input(input.client_id, &input);
-//!     }
+//!     // Start the server - this runs the main game loop which:
+//!     // - Listens for client connections and input packets
+//!     // - Processes inputs in chronological order across all clients
+//!     // - Runs physics simulation at the specified tick rate
+//!     // - Broadcasts game state updates to all connected clients
+//!     // - Handles client timeouts and disconnections
+//!     server.run().await?;
 //!     
-//!     // Update game simulation
-//!     game.update_physics();
-//!     
-//!     // Broadcast current state to all clients
-//!     let game_state = game.create_state_packet();
-//!     for client_addr in client_manager.get_active_clients() {
-//!         network.send_game_state(client_addr, &game_state)?;
-//!     }
+//!     Ok(())
 //! }
 //! ```
+//!
+//! The server uses an event-driven architecture with internal async tasks that handle:
+//! - **Network Receiver**: Continuously listens for incoming packets
+//! - **Network Sender**: Processes outgoing packet queue and broadcasts
+//! - **Timeout Checker**: Monitors client health and removes inactive connections
+//! - **Main Game Loop**: Processes inputs, runs physics, and broadcasts state
 //!
 //! ## Security Considerations
 //!

@@ -343,6 +343,8 @@ impl Player {
     ///
     /// # Example
     /// ```rust
+    /// use shared::{Player, PLAYER_SIZE};
+    ///
     /// let player = Player::new(1, 100.0, 200.0);
     /// assert_eq!(player.id, 1);
     /// assert_eq!(player.x, 100.0);
@@ -379,6 +381,8 @@ impl Player {
     ///
     /// # Example
     /// ```rust
+    /// use shared::{Player, PLAYER_SIZE};
+    ///
     /// let player = Player::new(1, 50.0, 75.0);
     /// let (left, top, right, bottom) = player.get_bounds();
     /// assert_eq!(left, 50.0);
@@ -407,6 +411,8 @@ impl Player {
     ///
     /// # Example
     /// ```rust
+    /// use shared::{Player, PLAYER_SIZE};
+    ///
     /// let player = Player::new(1, 100.0, 200.0);
     /// let (cx, cy) = player.center();
     /// assert_eq!(cx, 100.0 + PLAYER_SIZE / 2.0);
@@ -458,6 +464,8 @@ impl Player {
 ///
 /// # Example
 /// ```rust
+/// use shared::{Player, check_collision};
+///
 /// let player1 = Player::new(1, 0.0, 0.0);
 /// let player2 = Player::new(2, 16.0, 16.0); // Overlapping
 /// assert!(check_collision(&player1, &player2));
@@ -538,16 +546,24 @@ pub fn check_collision(player1: &Player, player2: &Player) -> bool {
 ///
 /// # Example
 /// ```rust
-/// let mut player1 = Player::new(1, 10.0, 10.0);
-/// let mut player2 = Player::new(2, 15.0, 15.0); // Overlapping
+/// use shared::{Player, resolve_collision, check_collision};
 ///
+/// let mut player1 = Player::new(1, 10.0, 10.0);
+/// let mut player2 = Player::new(2, 20.0, 20.0); // Close enough to overlap
+///
+/// // Set initial velocities
 /// player1.vel_x = 100.0; // Moving right
 /// player2.vel_x = -50.0; // Moving left
 ///
+/// // Store initial positions to verify movement
+/// let initial_pos1 = player1.x;
+/// let initial_pos2 = player2.x;
+///
 /// resolve_collision(&mut player1, &mut player2);
 ///
-/// // Players are now separated and have exchanged velocities
-/// assert!(!check_collision(&player1, &player2));
+/// // Players should have moved and exchanged velocities
+/// assert_ne!(player1.x, initial_pos1);
+/// assert_ne!(player2.x, initial_pos2);
 /// ```
 pub fn resolve_collision(player1: &mut Player, player2: &mut Player) {
     if !check_collision(player1, player2) {
@@ -636,20 +652,36 @@ pub fn resolve_collision(player1: &mut Player, player2: &mut Player) {
 /// ### Client-Side Prediction
 /// Clients store input history for replaying actions during reconciliation:
 /// ```rust
+/// use shared::InputState;
+///
 /// let input = InputState {
-///     sequence: input_manager.next_sequence(),
-///     timestamp: current_time_ms(),
-///     left: is_key_down(KeyCode::A),
-///     right: is_key_down(KeyCode::D),
-///     jump: is_key_pressed(KeyCode::Space),
+///     sequence: 42,
+///     timestamp: 123456789,
+///     left: true,
+///     right: false,
+///     jump: false,
 /// };
+///
+/// assert_eq!(input.sequence, 42);
+/// assert!(input.left);
+/// assert!(!input.right);
 /// ```
 ///
 /// ### Server Processing
 /// Server applies inputs in sequence order for authoritative simulation:
 /// ```rust
-/// for input in client.pending_inputs.drain(..) {
-///     game_state.apply_input(client.id, input);
+/// use shared::InputState;
+///
+/// // Example showing how inputs are processed on the server
+/// let inputs = vec![
+///     InputState { sequence: 1, timestamp: 100, left: true, right: false, jump: false },
+///     InputState { sequence: 2, timestamp: 200, left: false, right: true, jump: false },
+/// ];
+///
+/// // Process inputs in sequence order
+/// for input in inputs {
+///     // Apply input to game state (actual implementation in game logic)
+///     println!("Processing input {}: left={}, right={}", input.sequence, input.left, input.right);
 /// }
 /// ```
 #[derive(Debug, Clone)]

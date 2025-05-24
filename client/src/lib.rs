@@ -57,33 +57,22 @@
 //!
 //! ## Usage Example
 //!
-//! ```rust
-//! use client::*;
+//! ```rust,no_run
+//! use client::network::Client;
 //!
-//! // Initialize client components
-//! let mut game = game::GameState::new();
-//! let mut input_manager = input::InputManager::new();
-//! let mut network = network::NetworkClient::new("127.0.0.1:8080")?;
-//! let mut renderer = rendering::Renderer::new()?;
-//!
-//! // Main game loop
-//! loop {
-//!     // Capture player input
-//!     let input = input_manager.capture_input();
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Create client with server address and optional artificial latency for testing
+//!     let mut client = Client::new("127.0.0.1:8080", 0).await?;
 //!     
-//!     // Apply input locally for prediction
-//!     game.apply_input(&input);
+//!     // Run the client - this handles the complete game loop including:
+//!     // - Network connection and packet processing
+//!     // - Input capture and transmission to server  
+//!     // - Client-side prediction and server reconciliation
+//!     // - Rendering with interpolation and netcode visualization
+//!     client.run().await?;
 //!     
-//!     // Send input to server
-//!     network.send_input(input)?;
-//!     
-//!     // Process server updates
-//!     if let Some(game_state) = network.receive_game_state()? {
-//!         game.reconcile_with_server_state(game_state);
-//!     }
-//!     
-//!     // Render current state
-//!     renderer.render(&game.get_display_state())?;
+//!     Ok(())
 //! }
 //! ```
 //!

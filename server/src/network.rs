@@ -112,8 +112,10 @@ impl Server {
     ///
     /// # Example
     /// ```rust
-    /// use std::time::Duration;
-    /// let server = Server::new("127.0.0.1:8080", Duration::from_millis(16), 32).await?;
+    /// # use std::time::Duration;
+    /// # tokio_test::block_on(async {
+    /// let server = server::network::Server::new("127.0.0.1:8080", Duration::from_millis(16), 32).await;
+    /// # });
     /// ```
     pub async fn new(
         addr: &str,
