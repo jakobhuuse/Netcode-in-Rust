@@ -119,9 +119,9 @@ impl Renderer {
         for player in players {
             let is_local_player = Some(player.id) == config.client_id;
             let color = if is_local_player {
-                GREEN  // Local player is easily identifiable
+                GREEN // Local player is easily identifiable
             } else {
-                Color::from_rgba(255, 68, 68, 255)  // Other players are red for contrast
+                Color::from_rgba(255, 68, 68, 255) // Other players are red for contrast
             };
 
             self.draw_player(player, color);
@@ -225,7 +225,7 @@ impl Renderer {
         }
 
         let arrow_size = 5.0;
-        let nx = dx / length;  // Normalized direction vector
+        let nx = dx / length; // Normalized direction vector
         let ny = dy / length;
 
         // Perpendicular vector for arrow wing calculation
@@ -262,7 +262,7 @@ impl Renderer {
             3 => BLUE,
             4 => YELLOW,
             5 => MAGENTA,
-            6 => Color::from_rgba(0, 255, 255, 255),  // Cyan
+            6 => Color::from_rgba(0, 255, 255, 255), // Cyan
             _ => Color::from_rgba(136, 136, 136, 255), // Gray
         };
 
@@ -312,15 +312,15 @@ impl Renderer {
 
         // Connection status indicator with clear visual feedback
         let connection_color = if config.client_id.is_some() {
-            GREEN  // Connected
+            GREEN // Connected
         } else {
-            RED    // Disconnected
+            RED // Disconnected
         };
         draw_rectangle(10.0, y_start + 35.0, 8.0, 8.0, connection_color);
         let connection_text = if config.client_id.is_some() {
-            "CON"  // Connected
+            "CON" // Connected
         } else {
-            "DIS"  // Disconnected
+            "DIS" // Disconnected
         };
         draw_text(connection_text, 20.0, y_start + 35.0 + 8.0, 12.0, WHITE);
 
@@ -336,9 +336,9 @@ impl Renderer {
             y_start + 50.0
         };
         let total_ping = if config.fake_ping_ms > 0 {
-            config.fake_ping_ms  // Use simulated ping if artificial latency is enabled
+            config.fake_ping_ms // Use simulated ping if artificial latency is enabled
         } else {
-            config.ping_ms       // Use actual measured ping
+            config.ping_ms // Use actual measured ping
         };
         // Convert ping to bar count (20ms per bar, max 10 bars = 200ms+)
         let ping_bars = ((total_ping / 20).min(10)) as i32;
@@ -347,14 +347,14 @@ impl Renderer {
         for i in 0..10i32 {
             let bar_color = if i < ping_bars {
                 if total_ping < 50 {
-                    GREEN      // Excellent ping (< 50ms)
+                    GREEN // Excellent ping (< 50ms)
                 } else if total_ping < 100 {
-                    YELLOW     // Good ping (50-100ms)
+                    YELLOW // Good ping (50-100ms)
                 } else {
-                    RED        // Poor ping (> 100ms)
+                    RED // Poor ping (> 100ms)
                 }
             } else {
-                Color::from_rgba(51, 51, 51, 255)  // Empty bar (dark gray)
+                Color::from_rgba(51, 51, 51, 255) // Empty bar (dark gray)
             };
 
             draw_rectangle(10.0 + (i as f32) * 3.0, ping_y, 2.0, 8.0, bar_color);
@@ -365,13 +365,14 @@ impl Renderer {
 
         // Player count visualization using small squares
         let player_y = ping_y + 15.0;
-        for i in 0..(config.player_count.min(8)) {  // Max 8 squares to fit UI space
+        for i in 0..(config.player_count.min(8)) {
+            // Max 8 squares to fit UI space
             draw_rectangle(
                 10.0 + (i as f32) * 4.0,
                 player_y,
                 3.0,
                 3.0,
-                Color::from_rgba(0, 170, 255, 255),  // Blue squares for players
+                Color::from_rgba(0, 170, 255, 255), // Blue squares for players
             );
         }
         let player_text = format!("{} players", config.player_count);

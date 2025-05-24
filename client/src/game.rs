@@ -8,17 +8,17 @@ use std::collections::HashMap;
 /// Configuration for how server state updates should be processed
 #[derive(Debug, Clone)]
 pub struct ServerStateConfig {
-    pub client_id: Option<u32>,         // Local player ID (if connected)
-    pub reconciliation_enabled: bool,   // Whether to perform rollback/replay
-    pub interpolation_enabled: bool,    // Whether to buffer states for interpolation
+    pub client_id: Option<u32>,       // Local player ID (if connected)
+    pub reconciliation_enabled: bool, // Whether to perform rollback/replay
+    pub interpolation_enabled: bool,  // Whether to buffer states for interpolation
 }
 
 /// Basic game state containing all players and simulation tick
 /// Used for both authoritative server state and predicted client state
 #[derive(Debug, Clone)]
 pub struct GameState {
-    pub tick: u32,                      // Simulation tick number
-    pub players: HashMap<u32, Player>,  // All players indexed by ID
+    pub tick: u32,                     // Simulation tick number
+    pub players: HashMap<u32, Player>, // All players indexed by ID
 }
 
 impl GameState {
@@ -36,7 +36,7 @@ impl GameState {
         if let Some(player) = self.players.get_mut(&client_id) {
             // Reset horizontal velocity first
             player.vel_x = 0.0;
-            
+
             // Apply horizontal movement
             if input.left {
                 player.vel_x -= PLAYER_SPEED;
@@ -135,7 +135,7 @@ pub struct ClientGameState {
     pub last_confirmed_tick: u32,       // Tick of last confirmed server state
     pub interpolation_buffer: Vec<(u64, Vec<Player>)>, // Timestamped states for interpolation
     pub physics_accumulator: f32,       // Accumulates time for fixed timestep
-    pub fixed_timestep: f32,           // Fixed timestep for deterministic simulation (60 FPS)
+    pub fixed_timestep: f32,            // Fixed timestep for deterministic simulation (60 FPS)
 }
 
 impl ClientGameState {
@@ -148,7 +148,7 @@ impl ClientGameState {
             last_confirmed_tick: 0,
             interpolation_buffer: Vec::new(),
             physics_accumulator: 0.0,
-            fixed_timestep: 1.0 / 60.0,  // 60 FPS for deterministic simulation
+            fixed_timestep: 1.0 / 60.0, // 60 FPS for deterministic simulation
         }
     }
 
@@ -208,11 +208,11 @@ impl ClientGameState {
     }
 
     /// Performs client-side reconciliation to correct prediction errors
-    /// 
+    ///
     /// Reconciliation is a key netcode technique that corrects client prediction when
     /// the server's authoritative state differs from the client's predicted state.
     /// This method implements rollback and replay:
-    /// 1. Removes acknowledged inputs from history 
+    /// 1. Removes acknowledged inputs from history
     /// 2. Checks if predicted state diverged from server state
     /// 3. If divergence is significant, rolls back to server state
     /// 4. Replays unacknowledged inputs to restore prediction
@@ -257,7 +257,7 @@ impl ClientGameState {
     }
 
     /// Applies client-side prediction for immediate input response
-    /// 
+    ///
     /// Client-side prediction allows the game to feel responsive by immediately
     /// applying player input locally rather than waiting for server confirmation.
     /// The input is stored in history for potential reconciliation later.
@@ -277,7 +277,7 @@ impl ClientGameState {
     }
 
     /// Updates physics accumulator for fixed timestep simulation
-    /// 
+    ///
     /// Accumulates frame time and processes physics in fixed timesteps
     /// to ensure deterministic simulation regardless of frame rate.
     /// Uses remainder accumulation to handle fractional timesteps.
@@ -291,12 +291,12 @@ impl ClientGameState {
     }
 
     /// Gets player positions for rendering based on netcode configuration
-    /// 
+    ///
     /// Returns appropriate player state for rendering depending on enabled features:
     /// - Interpolation: Returns interpolated positions for smooth remote player movement
     /// - Prediction: Uses predicted state for local player, confirmed for others
     /// - Neither: Uses confirmed server state for all players
-    /// 
+    ///
     /// This separation allows different netcode features to be toggled independently.
     pub fn get_render_players(
         &self,
@@ -335,11 +335,11 @@ impl ClientGameState {
     }
 
     /// Performs temporal interpolation between buffered server states
-    /// 
+    ///
     /// Interpolation smooths remote player movement by rendering positions
     /// between two buffered server states. This creates visually smooth movement
     /// for remote players while maintaining gameplay responsiveness.
-    /// 
+    ///
     /// The implementation uses a 150ms render delay to ensure enough buffered
     /// states for smooth interpolation, trading slight visual latency for smoothness.
     fn get_interpolated_players(&self, client_id: Option<u32>) -> Vec<Player> {

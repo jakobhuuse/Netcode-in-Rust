@@ -1,5 +1,5 @@
 //! Client-side network implementation for real-time multiplayer game
-//! 
+//!
 //! This module implements the client's network layer, handling:
 //! - UDP connection management with timeout detection
 //! - Artificial latency simulation for testing netcode
@@ -19,14 +19,7 @@ use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
 /// Main client structure managing network communication and game state
-/// 
-/// The client handles all networking responsibilities including:
-/// - Maintaining UDP connection to game server
-/// - Managing artificial latency for testing network conditions
-/// - Coordinating input, prediction, and rendering systems
-/// - Tracking connection health and implementing reconnection logic
-/// Main client structure managing network communication and game state
-/// 
+///
 /// The client handles all networking responsibilities including:
 /// - Maintaining UDP connection to game server
 /// - Managing artificial latency for testing network conditions
@@ -46,12 +39,12 @@ pub struct Client {
 
     // Connection monitoring
     ping_ms: u64,
-    fake_ping_ms: u64,                    // Artificial latency for testing
+    fake_ping_ms: u64, // Artificial latency for testing
     last_packet_received: Instant,
     connection_timeout: Duration,
 
     // Packet queuing for artificial latency simulation
-    outgoing_packets: VecDeque<(Vec<u8>, Instant)>,     // (data, send_time)
+    outgoing_packets: VecDeque<(Vec<u8>, Instant)>, // (data, send_time)
     incoming_packets: VecDeque<(Packet, Instant, Instant)>, // (packet, process_time, receive_time)
 
     // Netcode feature toggles
@@ -62,7 +55,7 @@ pub struct Client {
 
 impl Client {
     /// Creates a new client instance with specified server address and artificial latency
-    /// 
+    ///
     /// Sets up UDP socket, initializes game systems, and configures netcode features.
     /// The fake_ping_ms parameter allows testing network conditions by artificially
     /// delaying packet transmission and processing.
@@ -99,7 +92,7 @@ impl Client {
     }
 
     /// Initiates connection to the game server
-    /// 
+    ///
     /// Sends initial connection packet with client version information.
     /// The server will respond with a Connected packet containing the assigned client ID.
     async fn connect(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -112,7 +105,7 @@ impl Client {
     }
 
     /// Attempts to reconnect to the server after connection loss
-    /// 
+    ///
     /// Performs clean disconnection if still connected, resets client state,
     /// and initiates a fresh connection. Used for both manual reconnection
     /// and automatic recovery from connection timeouts.
@@ -141,7 +134,7 @@ impl Client {
     }
 
     /// Monitors connection health and detects timeouts
-    /// 
+    ///
     /// Checks if too much time has passed since the last received packet.
     /// Marks the client as disconnected if the timeout threshold is exceeded,
     /// allowing the main loop to handle reconnection logic.
@@ -154,7 +147,7 @@ impl Client {
     }
 
     /// Sends a packet to the server with optional artificial latency
-    /// 
+    ///
     /// Serializes the packet and either sends immediately or queues for delayed
     /// transmission if artificial latency is enabled. This allows testing of
     /// netcode behavior under various network conditions.
@@ -175,7 +168,7 @@ impl Client {
     }
 
     /// Processes queued outgoing packets for artificial latency simulation
-    /// 
+    ///
     /// Checks if any queued packets are ready to be sent based on their
     /// scheduled transmission time. This simulates network delay by holding
     /// packets until the artificial latency period has elapsed.
@@ -193,7 +186,7 @@ impl Client {
     }
 
     /// Processes queued incoming packets for artificial latency simulation
-    /// 
+    ///
     /// Handles packets that have been delayed to simulate network latency.
     /// Packets are processed when their scheduled processing time is reached,
     /// maintaining the artificial delay for realistic netcode testing.
@@ -210,12 +203,12 @@ impl Client {
     }
 
     /// Handles incoming packets from the server
-    /// 
+    ///
     /// Processes different packet types and updates client state accordingly:
     /// - Connected: Establishes client ID and connection status
     /// - GameState: Updates game simulation and triggers netcode features
     /// - Disconnected: Handles server-initiated disconnection
-    /// 
+    ///
     /// Also calculates ping time and updates connection health tracking.
     fn handle_packet_sync(&mut self, packet: Packet, _receive_time: Instant) {
         // Update connection health tracking
@@ -280,7 +273,7 @@ impl Client {
     }
 
     /// Sends player input to the server and applies client-side prediction
-    /// 
+    ///
     /// Transmits input state with sequence numbering for reliability and
     /// acknowledgment tracking. If prediction is enabled, immediately applies
     /// the input locally for responsive gameplay while waiting for server
@@ -312,7 +305,7 @@ impl Client {
     }
 
     /// Handles runtime toggle of netcode features via keyboard input
-    /// 
+    ///
     /// Allows dynamic enable/disable of prediction, reconciliation, interpolation,
     /// and manual reconnection during gameplay for testing and demonstration.
     /// Returns true if reconnection was requested.
@@ -340,13 +333,13 @@ impl Client {
     }
 
     /// Main client game loop handling network, input, and rendering
-    /// 
+    ///
     /// Orchestrates the complete client-side game experience:
     /// 1. Network: Processes incoming/outgoing packets with artificial latency
     /// 2. Input: Captures player input and sends to server at 60Hz
     /// 3. Physics: Updates game simulation with fixed timesteps
     /// 4. Rendering: Displays game state with appropriate netcode visualization
-    /// 
+    ///
     /// The loop runs at 60 FPS with separate timing for input sampling and rendering
     /// to ensure consistent gameplay regardless of frame rate variations.
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -355,8 +348,8 @@ impl Client {
         // Timing control for consistent update rates
         let mut last_input_time = Instant::now();
         let mut last_render_time = Instant::now();
-        let input_interval = Duration::from_millis(16);   // 60Hz input sampling
-        let render_interval = Duration::from_millis(16);   // 60 FPS rendering
+        let input_interval = Duration::from_millis(16); // 60Hz input sampling
+        let render_interval = Duration::from_millis(16); // 60 FPS rendering
 
         let mut buffer = [0u8; 2048];
 

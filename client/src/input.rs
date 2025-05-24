@@ -53,11 +53,11 @@ pub struct InputManager {
     /// Monotonically increasing sequence number for inputs
     /// Ensures server can process inputs in correct chronological order
     next_sequence: u32,
-    
+
     /// Last captured input state
     /// Used for change detection to minimize network traffic
     current_input: InputState,
-    
+
     /// Timestamp of last input transmission
     /// Used for keep-alive mechanism to prevent connection timeouts
     last_input_sent: Instant,

@@ -1,5 +1,5 @@
 //! Server-side game state management and physics simulation
-//! 
+//!
 //! This module implements the authoritative game simulation that runs on the server.
 //! It handles:
 //! - Authoritative player state management and physics
@@ -16,7 +16,7 @@ use shared::{
 use std::collections::HashMap;
 
 /// Authoritative game state maintained by the server
-/// 
+///
 /// This structure represents the single source of truth for the game world.
 /// All clients must synchronize to this state, which is updated deterministically
 /// using fixed timesteps to ensure consistency across the multiplayer session.
@@ -30,7 +30,7 @@ pub struct GameState {
 
 impl GameState {
     /// Creates a new empty game state
-    /// 
+    ///
     /// Initializes the authoritative game world with no players and tick 0.
     /// Players will be added dynamically as clients connect to the server.
     pub fn new() -> Self {
@@ -41,7 +41,7 @@ impl GameState {
     }
 
     /// Adds a new player to the game world when a client connects
-    /// 
+    ///
     /// Spawns the player at a deterministic position based on their client ID
     /// to avoid overlapping spawns. The spawn position is distributed across
     /// the game world width to separate multiple players.
@@ -57,7 +57,7 @@ impl GameState {
     }
 
     /// Removes a player from the game world when a client disconnects
-    /// 
+    ///
     /// Cleans up player state and logs the disconnection for server monitoring.
     /// Other players will no longer see or collide with the disconnected player.
     pub fn remove_player(&mut self, client_id: &u32) {
@@ -66,7 +66,7 @@ impl GameState {
     }
 
     /// Applies validated client input to update player state
-    /// 
+    ///
     /// Processes input commands from clients and updates the corresponding
     /// player's velocity and state. Input validation ensures only connected
     /// players can affect the game state. Movement and jumping are applied
@@ -75,7 +75,7 @@ impl GameState {
         if let Some(player) = self.players.get_mut(&client_id) {
             // Reset horizontal velocity each frame (no momentum)
             player.vel_x = 0.0;
-            
+
             // Apply horizontal movement based on input
             if input.left {
                 player.vel_x -= PLAYER_SPEED;
@@ -93,7 +93,7 @@ impl GameState {
     }
 
     /// Updates physics simulation for all players using fixed timestep
-    /// 
+    ///
     /// Applies physics forces (gravity), updates positions based on velocity,
     /// enforces world boundaries, and handles ground/ceiling collisions.
     /// Uses deterministic fixed timestep to ensure identical simulation
@@ -131,7 +131,7 @@ impl GameState {
     }
 
     /// Handles collision detection and resolution between all players
-    /// 
+    ///
     /// Iterates through all player pairs to detect overlaps and applies
     /// collision resolution using the shared collision system. This ensures
     /// players cannot occupy the same space and creates realistic physics

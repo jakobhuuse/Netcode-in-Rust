@@ -1,11 +1,11 @@
 //! Client connection management and input queuing for the multiplayer server
-//! 
+//!
 //! This module handles the server-side management of connected clients, including:
 //! - Client connection lifecycle (connect, disconnect, timeout)
 //! - Input buffering and chronological ordering for deterministic simulation
 //! - Connection health monitoring and automatic cleanup
 //! - Client capacity management and address tracking
-//! 
+//!
 //! The client manager ensures reliable input processing and maintains
 //! authoritative control over which clients are allowed to participate.
 
@@ -16,7 +16,7 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 /// Represents a connected client and their input state
-/// 
+///
 /// Each client maintains:
 /// - Connection metadata (ID, address, last activity)
 /// - Input acknowledgment tracking for reliable delivery
@@ -37,7 +37,7 @@ pub struct Client {
 
 impl Client {
     /// Creates a new client with the given ID and network address
-    /// 
+    ///
     /// Initializes the client with default values and marks them as
     /// recently active. The client starts with no processed inputs
     /// and an empty input buffer.
@@ -52,7 +52,7 @@ impl Client {
     }
 
     /// Adds a new input to the client's pending queue
-    /// 
+    ///
     /// Updates the client's last seen time and inserts the input into
     /// the buffer in sequence order. This ensures inputs are processed
     /// in the correct chronological order even if packets arrive out of order.
@@ -64,7 +64,7 @@ impl Client {
     }
 
     /// Checks if the client has exceeded the connection timeout
-    /// 
+    ///
     /// Returns true if no packets have been received from this client
     /// within the specified timeout duration, indicating a likely disconnect.
     pub fn is_timed_out(&self, timeout: Duration) -> bool {
@@ -73,7 +73,7 @@ impl Client {
 }
 
 /// Manages all connected clients and their input processing
-/// 
+///
 /// The ClientManager provides centralized control over client connections,
 /// enforces server capacity limits, and ensures deterministic input processing
 /// by maintaining chronological order across all clients. This is crucial for
@@ -89,7 +89,7 @@ pub struct ClientManager {
 
 impl ClientManager {
     /// Creates a new client manager with the specified capacity limit
-    /// 
+    ///
     /// Initializes an empty client roster with the given maximum client limit.
     /// Client IDs start from 1 and increment for each new connection.
     pub fn new(max_clients: usize) -> Self {
@@ -101,7 +101,7 @@ impl ClientManager {
     }
 
     /// Attempts to add a new client connection
-    /// 
+    ///
     /// Returns Some(client_id) if successful, None if server is at capacity.
     /// Each client gets a unique ID and is associated with their network address
     /// for response routing. Logs the new connection for server monitoring.
@@ -122,7 +122,7 @@ impl ClientManager {
     }
 
     /// Removes a client from the server
-    /// 
+    ///
     /// Cleans up client state and logs the disconnection. Returns true if
     /// the client was found and removed, false if they were already gone.
     /// This handles both explicit disconnections and timeout cleanup.
@@ -136,7 +136,7 @@ impl ClientManager {
     }
 
     /// Finds a client ID by their network address
-    /// 
+    ///
     /// Used to associate incoming packets with existing client connections.
     /// Returns None if no client is connected from the given address.
     pub fn find_client_by_addr(&self, addr: SocketAddr) -> Option<u32> {
@@ -147,7 +147,7 @@ impl ClientManager {
     }
 
     /// Adds an input to a specific client's pending queue
-    /// 
+    ///
     /// Updates the client's activity timestamp and buffers the input for
     /// processing. Returns false if the client ID is invalid.
     pub fn add_input(&mut self, client_id: u32, input: InputState) -> bool {
@@ -160,7 +160,7 @@ impl ClientManager {
     }
 
     /// Gets all unprocessed inputs sorted chronologically
-    /// 
+    ///
     /// Collects inputs from all clients that haven't been processed yet,
     /// sorts them by timestamp to ensure deterministic processing order.
     /// This is critical for maintaining consistent game state across
@@ -183,7 +183,7 @@ impl ClientManager {
     }
 
     /// Marks an input sequence as processed for a specific client
-    /// 
+    ///
     /// Updates the client's last processed input sequence number to support
     /// client-side reconciliation. Clients can use this information to clean
     /// up their prediction history and detect when rollback is needed.
@@ -194,7 +194,7 @@ impl ClientManager {
     }
 
     /// Removes inputs that have been processed from all client buffers
-    /// 
+    ///
     /// Cleans up memory by removing inputs that have already been applied
     /// to the game state. This prevents unbounded memory growth while
     /// maintaining inputs needed for reconciliation.
@@ -207,7 +207,7 @@ impl ClientManager {
     }
 
     /// Gets the last processed input sequence for each client
-    /// 
+    ///
     /// Returns a map of client IDs to their highest processed input sequence.
     /// This information is sent to clients to enable reconciliation by
     /// letting them know which inputs have been authoritatively processed.
@@ -219,7 +219,7 @@ impl ClientManager {
     }
 
     /// Checks for and removes timed-out clients
-    /// 
+    ///
     /// Automatically disconnects clients that haven't sent packets within
     /// the timeout threshold. Returns a list of removed client IDs for
     /// cleanup in other game systems. This ensures server resources are
@@ -242,7 +242,7 @@ impl ClientManager {
     }
 
     /// Gets all client IDs and their network addresses
-    /// 
+    ///
     /// Used for broadcasting game state updates to all connected clients.
     /// Returns a vector of (client_id, address) pairs for efficient
     /// packet distribution during the server's main game loop.
@@ -266,7 +266,7 @@ impl ClientManager {
 }
 
 /// Comprehensive test suite for client manager functionality
-/// 
+///
 /// Tests cover client lifecycle management, input processing, timeout handling,
 /// and capacity enforcement. These tests ensure reliable multiplayer server
 /// operation and proper client state management.

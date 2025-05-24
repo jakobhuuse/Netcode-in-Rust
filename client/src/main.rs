@@ -1,10 +1,10 @@
 //! Client application entry point for the multiplayer netcode game
-//! 
+//!
 //! This is the main executable for the game client, handling:
 //! - Command-line argument parsing for server connection and latency simulation
 //! - Window configuration and graphics initialization
 //! - Client network instance creation and main game loop execution
-//! 
+//!
 //! The client connects to a game server and demonstrates various netcode
 //! techniques including prediction, reconciliation, and interpolation.
 
@@ -31,7 +31,7 @@ struct Args {
 }
 
 /// Configures the game window properties
-/// 
+///
 /// Sets up a resizable window with appropriate title and dimensions
 /// for the multiplayer game client interface.
 fn window_conf() -> Conf {
@@ -45,15 +45,15 @@ fn window_conf() -> Conf {
 }
 
 /// Main client application entry point
-/// 
+///
 /// Initializes logging, parses command-line arguments, and starts the game client.
 /// The client connects to the specified server and runs the main game loop,
 /// demonstrating real-time netcode techniques in a multiplayer environment.
-/// 
+///
 /// Command-line usage:
 /// - `-s/--server <address>`: Server to connect to (default: 127.0.0.1:8080)
 /// - `-l/--fake-ping <ms>`: Artificial latency for testing (default: 0)
-/// 
+///
 /// Interactive controls:
 /// - A/D: Move player left/right
 /// - Space: Jump

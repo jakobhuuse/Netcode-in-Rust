@@ -43,14 +43,9 @@ use tokio::time::interval;
 #[derive(Debug)]
 pub enum ServerMessage {
     /// A packet was received from a client and needs processing
-    PacketReceived {
-        packet: Packet,
-        addr: SocketAddr,
-    },
+    PacketReceived { packet: Packet, addr: SocketAddr },
     /// A client has timed out and should be removed from the game
-    ClientTimeout {
-        client_id: u32,
-    },
+    ClientTimeout { client_id: u32 },
     /// Server shutdown signal (currently unused but reserved for graceful shutdown)
     #[allow(dead_code)]
     Shutdown,
@@ -61,10 +56,7 @@ pub enum ServerMessage {
 #[derive(Debug)]
 pub enum GameMessage {
     /// Send a packet to a specific client
-    SendPacket {
-        packet: Packet,
-        addr: SocketAddr,
-    },
+    SendPacket { packet: Packet, addr: SocketAddr },
     /// Broadcast a packet to all clients, optionally excluding one
     BroadcastPacket {
         packet: Packet,
@@ -73,7 +65,7 @@ pub enum GameMessage {
 }
 
 /// The main server struct that orchestrates all networking and game simulation.
-/// 
+///
 /// This struct manages the authoritative game state and coordinates communication
 /// between multiple concurrent tasks:
 /// - Network receiver task for incoming packets
@@ -82,7 +74,7 @@ pub enum GameMessage {
 /// - Main game loop for physics simulation and state synchronization
 ///
 /// ## Concurrency Design
-/// 
+///
 /// The server uses message-passing channels to communicate between tasks, avoiding
 /// the need for complex locking mechanisms in the hot path. The game state and client
 /// manager are protected by async RwLocks to allow concurrent reads while ensuring
@@ -430,7 +422,7 @@ impl Server {
     /// Processes all queued client inputs and advances the physics simulation.
     ///
     /// This method implements several critical netcode concepts:
-    /// 
+    ///
     /// ## Adaptive Physics Stepping
     /// - Calculates required substeps to prevent collision tunneling
     /// - Distributes input processing across substeps for temporal accuracy
@@ -656,7 +648,7 @@ impl Server {
                     // Process all queued inputs and run physics
                     self.process_inputs(dt).await;
                     self.game_state.tick += 1;
-                    
+
                     // Broadcast updated state to all clients
                     self.broadcast_game_state().await;
 

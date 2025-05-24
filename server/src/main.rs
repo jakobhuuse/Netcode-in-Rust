@@ -15,7 +15,7 @@
 //!
 //! The server implements a concurrent, event-driven architecture:
 //! - **Main Thread**: Coordinates game simulation and state broadcasting
-//! - **Network Tasks**: Handle packet I/O asynchronously 
+//! - **Network Tasks**: Handle packet I/O asynchronously
 //! - **Client Manager**: Tracks connections and input queues
 //! - **Game State**: Authoritative physics simulation
 //!
@@ -41,28 +41,28 @@ use log::info;
 use std::time::Duration;
 
 /// Command line argument configuration for the game server.
-/// 
+///
 /// Uses the `clap` crate for parsing and validation of command line arguments,
 /// providing a user-friendly interface for server configuration.
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Server IP address to bind to.
-    /// 
+    ///
     /// Use "127.0.0.1" for local testing, "0.0.0.0" for public access.
     /// Default: "127.0.0.1" (localhost only)
     #[arg(short = 'H', long, default_value = "127.0.0.1")]
     host: String,
 
     /// Server port to listen on.
-    /// 
+    ///
     /// Choose an available port above 1024 for non-privileged operation.
     /// Default: 8080
     #[arg(short = 'p', long, default_value = "8080")]
     port: u16,
 
     /// Server tick rate in updates per second.
-    /// 
+    ///
     /// Higher rates provide more responsive gameplay but increase CPU usage.
     /// Common values: 20 (casual), 60 (standard), 128 (competitive)
     /// Default: 60 Hz
@@ -70,7 +70,7 @@ struct Args {
     tick_rate: u32,
 
     /// Maximum number of concurrent client connections.
-    /// 
+    ///
     /// Higher limits require more memory and CPU resources.
     /// Consider network bandwidth when setting this value.
     /// Default: 16 clients
@@ -81,22 +81,22 @@ struct Args {
 /// Main entry point for the game server.
 ///
 /// This function orchestrates server initialization and startup:
-/// 
+///
 /// 1. **Logging Setup**: Configures structured logging for debugging and monitoring
 /// 2. **Argument Parsing**: Processes command line configuration options
 /// 3. **Server Creation**: Initializes the network server with specified parameters
 /// 4. **Main Loop**: Starts the server's main execution loop
 ///
 /// ## Error Handling
-/// 
+///
 /// The function propagates errors up to the runtime, which will log them and exit
 /// with an appropriate error code. Common failure points:
 /// - Port already in use (address binding failure)
-/// - Invalid network interface (host binding failure) 
+/// - Invalid network interface (host binding failure)
 /// - System resource limits (too many file descriptors)
 ///
 /// ## Logging Configuration
-/// 
+///
 /// The server uses the `env_logger` crate for structured logging. Set the `RUST_LOG`
 /// environment variable to control verbosity:
 /// - `RUST_LOG=error`: Only critical errors
@@ -105,9 +105,10 @@ struct Args {
 /// - `RUST_LOG=debug`: Detailed debugging output
 /// - `RUST_LOG=trace`: Extremely verbose tracing (performance impact)
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {    // Initialize logging system
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize logging system
     env_logger::init();
-    
+
     // Provide helpful hint if logging isn't configured
     if std::env::var("RUST_LOG").is_err() {
         eprintln!("Set RUST_LOG=info for detailed logging");
