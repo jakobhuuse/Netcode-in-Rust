@@ -75,6 +75,11 @@ impl Client {
     pub async fn reconnect(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         info!("Attempting to reconnect...");
 
+        if self.connected {
+            let _ = self.send_packet(&Packet::Disconnect).await;
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
         self.connected = false;
         self.client_id = None;
         self.last_packet_received = Instant::now();
