@@ -66,7 +66,9 @@ impl Client {
         // Bind to any available port for client socket
         let socket = UdpSocket::bind("0.0.0.0:0")?;
         socket.set_nonblocking(true)?;
-        let server_addr = server_addr.parse()?;
+
+        // Resolve server address (supports both IP addresses and domain names)
+        let server_addr = Self::resolve_address(server_addr)?;
 
         let renderer = Renderer::new()?;
 
@@ -89,6 +91,32 @@ impl Client {
             reconciliation_enabled: true,
             interpolation_enabled: true,
         })
+    }
+
+    /// Resolves a server address string to a SocketAddr, supporting both IP addresses and domain names
+    ///
+    /// This method allows the client to connect to servers specified as:
+    /// - IP addresses: "192.168.1.100:8080", "127.0.0.1:8080"
+    /// - Domain names: "gameserver.example.com:8080", "localhost:8080"
+    ///
+    /// For domain names, it performs DNS resolution and returns the first resolved address.
+    fn resolve_address(addr_str: &str) -> Result<SocketAddr, Box<dyn std::error::Error>> {
+        // First try parsing as a direct SocketAddr (for IP addresses)
+        if let Ok(addr) = addr_str.parse::<SocketAddr>() {
+            return Ok(addr);
+        }
+
+        // If parsing fails, try DNS resolution (for domain names)
+        // Use standard library's synchronous DNS resolution
+        use std::net::ToSocketAddrs;
+        let mut addrs = addr_str.to_socket_addrs()?;
+
+        // Return the first resolved address
+        if let Some(addr) = addrs.next() {
+            Ok(addr)
+        } else {
+            Err(format!("Failed to resolve address: {}", addr_str).into())
+        }
     }
 
     /// Initiates connection to the game server
@@ -452,5 +480,48 @@ impl Client {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_address_ip() {
+        // Test with IPv4 address
+        let result = Client::resolve_address("127.0.0.1:8080");
+        assert!(result.is_ok());
+        let addr = result.unwrap();
+        assert_eq!(addr.ip().to_string(), "127.0.0.1");
+        assert_eq!(addr.port(), 8080);
+
+        // Test with IPv6 address
+        let result = Client::resolve_address("[::1]:8080");
+        assert!(result.is_ok());
+        let addr = result.unwrap();
+        assert_eq!(addr.port(), 8080);
+    }
+
+    #[test]
+    fn test_resolve_address_localhost() {
+        // Test with localhost domain name
+        let result = Client::resolve_address("localhost:8080");
+        assert!(result.is_ok());
+        let addr = result.unwrap();
+        assert_eq!(addr.port(), 8080);
+        // localhost should resolve to either 127.0.0.1 or ::1
+        assert!(addr.ip().to_string() == "127.0.0.1" || addr.ip().to_string() == "::1");
+    }
+
+    #[test]
+    fn test_resolve_address_invalid() {
+        // Test with invalid address format
+        let result = Client::resolve_address("invalid-address");
+        assert!(result.is_err());
+
+        // Test with invalid domain
+        let result = Client::resolve_address("nonexistent.invalid.domain:8080");
+        assert!(result.is_err());
     }
 }
