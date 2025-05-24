@@ -8,7 +8,7 @@ on:
 
 env:
     REGISTRY: registry.digitalocean.com
-    IMAGE_NAME: your-registry-name/netcode-server
+    IMAGE_NAME: netcode-registry/netcode-server
 
 jobs:
     ci:
@@ -98,14 +98,15 @@ jobs:
                       docker stop netcode-server || true
                       docker rm netcode-server || true
 
-                      # Pull and run new image
+                      # Pull and run new image with custom args
                       docker pull ${{ needs.build-and-push.outputs.image }}
                       docker run -d \
                           --name netcode-server \
                           --restart unless-stopped \
                           -p 8080:8080/udp \
                           -e RUST_LOG=info \
-                          ${{ needs.build-and-push.outputs.image }}
+                          ${{ needs.build-and-push.outputs.image }} \
+                          server --host 0.0.0.0 --port 8080 --tick-rate 60 --max-clients 50
 
                       # Clean up old images
                       docker image prune -f

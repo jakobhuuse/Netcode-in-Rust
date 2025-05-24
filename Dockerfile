@@ -37,4 +37,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD timeout 3 bash -c '</dev/tcp/localhost/8080' || exit 1
 
 # Run the server
-CMD ["server", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["server", "--host", "0.0.0.0", "--port", "8080", "--tick-rate", "60", "--max-clients", "32"]
