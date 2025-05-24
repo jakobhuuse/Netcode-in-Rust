@@ -1,10 +1,14 @@
-name: CI
+name: CI/CD
 
 on:
     push:
         branches: [main, dev]
     pull_request:
         branches: [main, dev]
+
+env:
+    REGISTRY: registry.digitalocean.com
+    IMAGE_NAME: your-registry-name/netcode-server
 
 jobs:
     ci:
@@ -27,3 +31,101 @@ jobs:
 
             - name: Build
               run: cargo build --workspace --release
+
+    build-and-push:
+        needs: ci
+        runs-on: ubuntu-latest
+        if: github.ref == 'refs/heads/main'
+        outputs:
+            image: ${{ steps.image.outputs.image }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Install doctl
+              uses: digitalocean/action-doctl@v2
+              with:
+                  token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+            - name: Login to DO Container Registry
+              run: doctl registry login --expiry-seconds 1200
+
+            - name: Extract metadata
+              id: meta
+              uses: docker/metadata-action@v5
+              with:
+                  images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+                  tags: |
+                      type=ref,event=branch
+                      type=sha,prefix={{branch}}-
+                      type=raw,value=latest,enable={{is_default_branch}}
+
+            - name: Build and push Docker image
+              uses: docker/build-push-action@v5
+              with:
+                  context: .
+                  push: true
+                  tags: ${{ steps.meta.outputs.tags }}
+                  labels: ${{ steps.meta.outputs.labels }}
+
+            - name: Set image output
+              id: image
+              run: echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_OUTPUT
+
+    deploy:
+        needs: build-and-push
+        runs-on: ubuntu-latest
+        if: github.ref == 'refs/heads/main'
+        steps:
+            - name: Deploy to DigitalOcean Droplet
+              uses: appleboy/ssh-action@v1.0.0
+              with:
+                  host: ${{ secrets.DROPLET_HOST }}
+                  username: ${{ secrets.DROPLET_USERNAME }}
+                  key: ${{ secrets.DROPLET_SSH_KEY }}
+                  script: |
+                      # Install Docker if not present
+                      if ! command -v docker &> /dev/null; then
+                          curl -fsSL https://get.docker.com -o get-docker.sh
+                          sudo sh get-docker.sh
+                          sudo usermod -aG docker $USER
+                      fi
+
+                      # Login to DO registry
+                      echo "${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}" | docker login registry.digitalocean.com -u "$(echo "${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}" | cut -c1-64)" --password-stdin
+
+                      # Stop existing container
+                      docker stop netcode-server || true
+                      docker rm netcode-server || true
+
+                      # Pull and run new image
+                      docker pull ${{ needs.build-and-push.outputs.image }}
+                      docker run -d \
+                          --name netcode-server \
+                          --restart unless-stopped \
+                          -p 8080:8080/udp \
+                          -e RUST_LOG=info \
+                          ${{ needs.build-and-push.outputs.image }}
+
+                      # Clean up old images
+                      docker image prune -f
+
+            - name: Verify deployment
+              uses: appleboy/ssh-action@v1.0.0
+              with:
+                  host: ${{ secrets.DROPLET_HOST }}
+                  username: ${{ secrets.DROPLET_USERNAME }}
+                  key: ${{ secrets.DROPLET_SSH_KEY }}
+                  script: |
+                      # Wait for container to start
+                      sleep 10
+
+                      # Check if container is running
+                      if docker ps | grep -q netcode-server; then
+                          echo "✅ Deployment successful! Container is running."
+                          docker logs --tail 20 netcode-server
+                      else
+                          echo "❌ Deployment failed! Container not running."
+                          docker logs netcode-server
+                          exit 1
+                      fi
