@@ -30,21 +30,6 @@ impl Client {
         self.pending_inputs.sort_by_key(|i| i.sequence);
     }
 
-    pub fn get_next_input(&mut self) -> Option<InputState> {
-        if let Some(input) = self.pending_inputs.first() {
-            if input.sequence <= self.last_processed_input {
-                return self.pending_inputs.remove(0).into();
-            }
-
-            if input.sequence == self.last_processed_input + 1 {
-                let input = self.pending_inputs.remove(0);
-                self.last_processed_input = input.sequence;
-                return Some(input);
-            }
-        }
-        None
-    }
-
     pub fn is_timed_out(&self, timeout: Duration) -> bool {
         self.last_seen.elapsed() > timeout
     }
@@ -105,16 +90,30 @@ impl ClientManager {
         }
     }
 
-    pub fn process_inputs<F>(&mut self, mut apply_fn: F)
-    where
-        F: FnMut(u32, &InputState, f32),
-    {
-        let dt = 1.0 / 60.0;
-
-        for (client_id, client) in &mut self.clients {
-            while let Some(input) = client.get_next_input() {
-                apply_fn(*client_id, &input, dt);
+    pub fn get_chronological_inputs(&self) -> Vec<(u32, InputState)> {
+        let mut all_inputs: Vec<(u32, InputState)> = Vec::new();
+        
+        for (client_id, client) in &self.clients {
+            for input in &client.pending_inputs {
+                if input.sequence > client.last_processed_input {
+                    all_inputs.push((*client_id, input.clone()));
+                }
             }
+        }
+
+        all_inputs.sort_by_key(|(_, input)| input.timestamp);
+        all_inputs
+    }
+
+    pub fn mark_input_processed(&mut self, client_id: u32, sequence: u32) {
+        if let Some(client) = self.clients.get_mut(&client_id) {
+            client.last_processed_input = client.last_processed_input.max(sequence);
+        }
+    }
+
+    pub fn cleanup_processed_inputs(&mut self) {
+        for client in self.clients.values_mut() {
+            client.pending_inputs.retain(|input| input.sequence > client.last_processed_input);
         }
     }
 

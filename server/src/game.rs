@@ -100,9 +100,4 @@ impl GameState {
             }
         }
     }
-
-    pub fn step(&mut self, dt: f32) {
-        self.update_physics(dt);
-        self.tick += 1;
-    }
 }

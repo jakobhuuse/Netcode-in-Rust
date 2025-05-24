@@ -2,7 +2,7 @@ use crate::client_manager::ClientManager;
 use crate::game::GameState;
 use bincode::{deserialize, serialize};
 use log::{debug, error, info, warn};
-use shared::{InputState, Packet, Player};
+use shared::{InputState, Packet, Player, PLAYER_SPEED, PLAYER_SIZE};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::net::UdpSocket;
@@ -103,9 +103,62 @@ impl Server {
     }
 
     fn process_inputs(&mut self, dt: f32) {
-        self.clients.process_inputs(|client_id, input, dt| {
-            self.game_state.apply_input(client_id, input, dt);
-        });
+        let total_substeps = self.calculate_required_substeps(dt);
+        let substep_dt = dt / total_substeps as f32;
+        
+        let all_inputs = self.clients.get_chronological_inputs();
+        
+        if all_inputs.is_empty() {
+            for _ in 0..total_substeps {
+                self.game_state.update_physics(substep_dt);
+            }
+            return;
+        }
+        
+        let inputs_per_substep = if all_inputs.len() >= total_substeps as usize {
+            all_inputs.len() / total_substeps as usize
+        } else {
+            1
+        };
+        
+        let mut input_index = 0;
+        
+        for substep in 0..total_substeps {
+            let inputs_this_step = if substep == total_substeps - 1 {
+                all_inputs.len() - input_index
+            } else {
+                inputs_per_substep.min(all_inputs.len() - input_index)
+            };
+            
+            for _ in 0..inputs_this_step {
+                if input_index < all_inputs.len() {
+                    let (client_id, input) = &all_inputs[input_index];
+                    self.game_state.apply_input(*client_id, input, substep_dt);
+                    
+                    self.clients.mark_input_processed(*client_id, input.sequence);
+                    input_index += 1;
+                }
+            }
+            
+            self.game_state.update_physics(substep_dt);
+        }
+        
+        self.clients.cleanup_processed_inputs();
+    }
+
+    fn calculate_required_substeps(&self, dt: f32) -> u32 {
+        const MAX_PLAYER_SPEED: f32 = PLAYER_SPEED;
+        const MIN_COLLISION_RADIUS: f32 = PLAYER_SIZE / 2.0;
+        const SAFETY_FACTOR: f32 = 0.5;
+        
+        let max_movement_per_step = MIN_COLLISION_RADIUS * SAFETY_FACTOR;
+        let max_movement_this_tick = MAX_PLAYER_SPEED * dt;
+        
+        if max_movement_this_tick > max_movement_per_step {
+            (max_movement_this_tick / max_movement_per_step).ceil() as u32
+        } else {
+            1
+        }
     }
 
     async fn broadcast_game_state(&mut self) {
@@ -170,7 +223,8 @@ impl Server {
                     last_tick = now;
 
                     self.process_inputs(dt);
-                    self.game_state.step(dt);
+                    
+                    self.game_state.tick += 1;
 
                     self.broadcast_game_state().await;
 
@@ -179,8 +233,13 @@ impl Server {
                         self.game_state.remove_player(&client_id);
                     }
 
-                    if self.game_state.tick % 300 == 0 && !self.clients.is_empty() {
-                        debug!("Tick {}: {} clients", self.game_state.tick, self.clients.len());
+                    if self.game_state.tick % 60 == 0 && !self.clients.is_empty() {
+                        let substeps = self.calculate_required_substeps(dt);
+                        debug!("Tick {}: {} clients, {:.1}Hz, {} physics substeps", 
+                               self.game_state.tick, 
+                               self.clients.len(),
+                               1.0 / dt,
+                               substeps);
                     }
                 },
             }
