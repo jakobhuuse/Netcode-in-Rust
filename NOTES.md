@@ -1,3 +1,0 @@
-Multithreading
-Clap
-Channel

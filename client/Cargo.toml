@@ -1,14 +1,14 @@
 [package]
-name = "server"
+name = "client"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "server"
+name = "client"
 path = "src/lib.rs"
 
 [[bin]]
-name = "server"
+name = "client"
 path = "src/main.rs"
 
 [dependencies]
@@ -19,7 +19,7 @@ bincode = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 clap = { workspace = true }
-rand = { workspace = true }
+macroquad = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }

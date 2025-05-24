@@ -1,99 +1,135 @@
+//! # Netcode Game Server
+//!
+//! This is the entry point for the authoritative game server that manages multiplayer
+//! gameplay for a networked physics-based game. The server maintains the definitive
+//! game state and handles client connections, input processing, and state synchronization.
+//!
+//! ## Command Line Interface
+//!
+//! The server accepts various configuration options via command line arguments:
+//! - **Host/Port**: Network binding configuration  
+//! - **Tick Rate**: Server simulation frequency (impacts responsiveness vs performance)
+//! - **Max Clients**: Connection capacity limit
+//!
+//! ## Architecture Overview
+//!
+//! The server implements a concurrent, event-driven architecture:
+//! - **Main Thread**: Coordinates game simulation and state broadcasting
+//! - **Network Tasks**: Handle packet I/O asynchronously
+//! - **Client Manager**: Tracks connections and input queues
+//! - **Game State**: Authoritative physics simulation
+//!
+//! ## Usage Examples
+//!
+//! ```bash
+//! # Start server on default settings (localhost:8080, 60Hz, 16 clients)
+//! ./server
+//!
+//! # Custom configuration
+//! ./server --host 0.0.0.0 --port 9999 --tick-rate 30 --max-clients 32
+//!
+//! # High-performance setup for competitive play
+//! ./server --tick-rate 128 --max-clients 8
+//! ```
+
+mod client_manager;
 mod game;
 mod network;
-mod physics;
+
 use clap::Parser;
-use game::GameState;
-use network::{GameCommand, NetworkServer};
-use physics::Vector2;
-use serde_json;
-use std::sync::{mpsc, Arc};
-use std::{thread, time::Duration};
+use log::info;
+use std::time::Duration;
 
-fn main() {
-    // Command line arguments
-    #[derive(Parser, Debug)]
-    #[clap(author, version, about)]
-    struct Args {
-        /// Server IP address to bind to
-        #[clap(short = 'H', long, default_value = "127.0.0.1")]
-        host: String,
+/// Command line argument configuration for the game server.
+///
+/// Uses the `clap` crate for parsing and validation of command line arguments,
+/// providing a user-friendly interface for server configuration.
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Server IP address to bind to.
+    ///
+    /// Use "127.0.0.1" for local testing, "0.0.0.0" for public access.
+    /// Default: "127.0.0.1" (localhost only)
+    #[arg(short = 'H', long, default_value = "127.0.0.1")]
+    host: String,
 
-        /// Server port to listen on
-        #[clap(short, long, default_value = "8080")]
-        port: u16,
+    /// Server port to listen on.
+    ///
+    /// Choose an available port above 1024 for non-privileged operation.
+    /// Default: 8080
+    #[arg(short = 'p', long, default_value = "8080")]
+    port: u16,
 
-        /// Tick rate (updates per second)
-        #[clap(short, long, default_value = "30")]
-        tick_rate: u32,
+    /// Server tick rate in updates per second.
+    ///
+    /// Higher rates provide more responsive gameplay but increase CPU usage.
+    /// Common values: 20 (casual), 60 (standard), 128 (competitive)
+    /// Default: 60 Hz
+    #[arg(short = 't', long, default_value = "60")]
+    tick_rate: u32,
+
+    /// Maximum number of concurrent client connections.
+    ///
+    /// Higher limits require more memory and CPU resources.
+    /// Consider network bandwidth when setting this value.
+    /// Default: 16 clients
+    #[arg(short = 'm', long, default_value = "16")]
+    max_clients: usize,
+}
+
+/// Main entry point for the game server.
+///
+/// This function orchestrates server initialization and startup:
+///
+/// 1. **Logging Setup**: Configures structured logging for debugging and monitoring
+/// 2. **Argument Parsing**: Processes command line configuration options
+/// 3. **Server Creation**: Initializes the network server with specified parameters
+/// 4. **Main Loop**: Starts the server's main execution loop
+///
+/// ## Error Handling
+///
+/// The function propagates errors up to the runtime, which will log them and exit
+/// with an appropriate error code. Common failure points:
+/// - Port already in use (address binding failure)
+/// - Invalid network interface (host binding failure)
+/// - System resource limits (too many file descriptors)
+///
+/// ## Logging Configuration
+///
+/// The server uses the `env_logger` crate for structured logging. Set the `RUST_LOG`
+/// environment variable to control verbosity:
+/// - `RUST_LOG=error`: Only critical errors
+/// - `RUST_LOG=warn`: Warnings and errors  
+/// - `RUST_LOG=info`: Standard operational logging (recommended)
+/// - `RUST_LOG=debug`: Detailed debugging output
+/// - `RUST_LOG=trace`: Extremely verbose tracing (performance impact)
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize logging system
+    env_logger::init();
+
+    // Provide helpful hint if logging isn't configured
+    if std::env::var("RUST_LOG").is_err() {
+        eprintln!("Set RUST_LOG=info for detailed logging");
     }
 
     // Parse command line arguments
     let args = Args::parse();
     let addr = format!("{}:{}", args.host, args.port);
-    let tick_interval = Duration::from_secs_f32(1.0 / args.tick_rate as f32);
+    let tick_duration = Duration::from_secs_f32(1.0 / args.tick_rate as f32);
 
-    // Create a new WebSocket server instance wrapped in Arc
-    let server = Arc::new(NetworkServer::new(&addr));
+    // Log server configuration
+    info!("Starting game server on {}", addr);
+    info!(
+        "Tick rate: {} Hz ({:?} per tick)",
+        args.tick_rate, tick_duration
+    );
+    info!("Max clients: {}", args.max_clients);
 
-    // Create a new game state instance wrapped in Arc and Mutex
-    let mut game_state = GameState::new();
+    // Initialize and start the server
+    let mut server = network::Server::new(&addr, tick_duration, args.max_clients).await?;
+    server.run().await?;
 
-    // Channel for network -> main (game) commands
-    let (cmd_sender, cmd_reciver) = mpsc::channel::<GameCommand>();
-
-    // Clone Arc for the thread and pass sender to network thread
-    let server_thread = Arc::clone(&server);
-    thread::spawn(move || {
-        if let Err(e) = server_thread.start(cmd_sender) {
-            eprintln!("Failed to start WebSocket-server: {}", e)
-        }
-    });
-
-    game_state.add_static_object(Vector2 { x: 0.0, y: -10.0 }, 200.0, 20.0);
-    loop {
-        // Handle all pending commands from network
-        while let Ok(cmd) = cmd_reciver.try_recv() {
-            match cmd {
-                GameCommand::AddPlayer { id } => {
-                    game_state.add_player(id);
-                }
-                GameCommand::RemovePlayer { id } => {
-                    game_state.remove_player(id);
-                }
-                GameCommand::SetPlayerGravity { id, gravity } => {
-                    game_state.set_player_gravity(id, gravity);
-                }
-                GameCommand::SetPlayerMaxSpeed { id, max_speed } => {
-                    game_state.set_player_max_speed(id, max_speed);
-                }
-                GameCommand::SetPlayerAccelerationSpeed {
-                    id,
-                    acceleration_speed,
-                } => {
-                    game_state.set_player_acceleration_speed(id, acceleration_speed);
-                }
-                GameCommand::SetPlayerJumpSpeed { id, jump_speed } => {
-                    game_state.set_player_jump_speed(id, jump_speed);
-                }
-                GameCommand::PlayerInput { id, input } => {
-                    game_state.update_player_input(id, input);
-                }
-            }
-        }
-
-        // Update the gamestate
-        game_state.update_positions(tick_interval.as_secs_f32());
-
-        for (id, seq) in game_state.get_player_seqs() {
-            server.send_message_to_client(id, &serde_json::to_string(&seq).unwrap());
-        }
-
-        // Broadcast gamestate
-        let positions = game_state.get_object_positions();
-        let msg = serde_json::to_string(&positions).unwrap();
-        server.broadcast_message(&msg);
-
-        // Sleep game-thread
-        thread::sleep(tick_interval);
-    }
+    Ok(())
 }

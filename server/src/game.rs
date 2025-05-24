@@ -1,240 +1,390 @@
-use serde::Serialize;
+//! Server-side game state management and physics simulation
+//!
+//! This module implements the authoritative game simulation that runs on the server.
+//! It handles:
+//! - Authoritative player state management and physics
+//! - Input validation and processing from connected clients
+//! - Deterministic physics simulation for consistent multiplayer state
+//! - Player collision detection and resolution
+//! - World boundary enforcement and game rules
 
-use crate::physics::{Object, Vector2};
-use std::str::FromStr;
+use log::info;
+use shared::{
+    resolve_collision, InputState, Player, FLOOR_Y, GRAVITY, JUMP_VELOCITY, PLAYER_SIZE,
+    PLAYER_SPEED, WORLD_WIDTH,
+};
+use std::collections::HashMap;
 
-#[derive(Serialize)]
-pub enum ObjectType {
-    Player,
-    Static,
-}
-
-//For returning positions as JSON
-#[derive(Serialize)]
-pub struct ObjectInfo {
-    object_type: ObjectType,
-    position: Vector2,
-    width: f32,
-    height: f32,
-}
-
-#[derive(Serialize)]
-pub struct SeqInfo {
-    last_seq: u32,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct PlayerInputState {
-    left: bool,
-    right: bool,
-    up: bool,
-    down: bool,
-    seq: u32,
-}
-
-impl FromStr for PlayerInputState {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut left = false;
-        let mut right = false;
-        let mut up = false;
-        let mut down = false;
-        let mut seq = 0;
-
-        //parse input that is in the format "left=1 right=0 ..."
-        for part in s.split_whitespace() {
-            let mut kv = part.split('=');
-            match (kv.next(), kv.next()) {
-                (Some("left"), Some(v)) => left = v == "1",
-                (Some("right"), Some(v)) => right = v == "1",
-                (Some("up"), Some(v)) => up = v == "1",
-                (Some("down"), Some(v)) => down = v == "1",
-                (Some("seq"), Some(v)) => seq = v.parse().unwrap_or(0),
-                _ => {}
-            }
-        }
-        Ok(PlayerInputState {
-            left,
-            right,
-            up,
-            down,
-            seq,
-        })
-    }
-}
-
-pub struct Player {
-    id: usize,
-    last_seq: u32,
-    object: Object,
-    acceleration_speed: f32,
-    jump_speed: f32,
-    grounded: bool,
-    input_state: PlayerInputState,
-}
-
+/// Authoritative game state maintained by the server
+///
+/// This structure represents the single source of truth for the game world.
+/// All clients must synchronize to this state, which is updated deterministically
+/// using fixed timesteps to ensure consistency across the multiplayer session.
+#[derive(Debug, Clone)]
 pub struct GameState {
-    players: Vec<Player>,
-    objects: Vec<Object>,
+    /// Current simulation tick counter for synchronization
+    pub tick: u32,
+    /// All connected players indexed by their client ID
+    pub players: HashMap<u32, Player>,
 }
 
 impl GameState {
+    /// Creates a new empty game state
+    ///
+    /// Initializes the authoritative game world with no players and tick 0.
+    /// Players will be added dynamically as clients connect to the server.
     pub fn new() -> Self {
-        GameState {
-            players: Vec::new(),
-            objects: Vec::new(),
+        Self {
+            tick: 0,
+            players: HashMap::new(),
         }
     }
 
-    pub fn add_player(&mut self, id: usize) {
-        let object = Object {
-            is_static: false,
-            width: 5.0,
-            height: 5.0,
-            position: Vector2 { x: 0.0, y: 10.0 },
-            velocity: Vector2 { x: 0.0, y: 0.0 },
-            acceleration: Vector2 { x: 0.0, y: 0.0 },
-            max_speed: 10.0,
-            gravity: 9.81,
-        };
-        let player = Player {
-            id,
-            last_seq: 0,
-            object,
-            acceleration_speed: 10.0,
-            jump_speed: 20.0,
-            grounded: false,
-            input_state: PlayerInputState::default(),
-        };
-        self.players.push(player);
+    /// Adds a new player to the game world when a client connects
+    ///
+    /// Spawns the player at a deterministic position based on their client ID
+    /// to avoid overlapping spawns. The spawn position is distributed across
+    /// the game world width to separate multiple players.
+    pub fn add_player(&mut self, client_id: u32) {
+        // Distribute spawn positions across the world to avoid collisions
+        let spawn_x = 100.0 + (client_id as f32 * 60.0) % (WORLD_WIDTH - 200.0);
+        let spawn_y = FLOOR_Y - PLAYER_SIZE;
+
+        let player = Player::new(client_id, spawn_x, spawn_y);
+
+        info!("Added player {} at ({}, {})", client_id, player.x, player.y);
+        self.players.insert(client_id, player);
     }
 
-    pub fn remove_player(&mut self, id: usize) {
-        self.players.retain(|p| p.id != id);
+    /// Removes a player from the game world when a client disconnects
+    ///
+    /// Cleans up player state and logs the disconnection for server monitoring.
+    /// Other players will no longer see or collide with the disconnected player.
+    pub fn remove_player(&mut self, client_id: &u32) {
+        self.players.remove(client_id);
+        info!("Removed player {}", client_id);
     }
 
-    pub fn get_object_positions(&self) -> Vec<ObjectInfo> {
-        let mut result: Vec<ObjectInfo> = self
-            .objects
-            .iter()
-            .map(|o| ObjectInfo {
-                object_type: ObjectType::Static,
-                position: o.position,
-                width: o.width,
-                height: o.height,
-            })
-            .collect();
+    /// Applies validated client input to update player state
+    ///
+    /// Processes input commands from clients and updates the corresponding
+    /// player's velocity and state. Input validation ensures only connected
+    /// players can affect the game state. Movement and jumping are applied
+    /// according to game physics rules.
+    pub fn apply_input(&mut self, client_id: u32, input: &InputState, _dt: f32) {
+        if let Some(player) = self.players.get_mut(&client_id) {
+            // Reset horizontal velocity each frame (no momentum)
+            player.vel_x = 0.0;
 
-        result.extend(self.players.iter().map(|p| ObjectInfo {
-            object_type: ObjectType::Player,
-            position: p.object.position,
-            width: p.object.width,
-            height: p.object.height,
-        }));
+            // Apply horizontal movement based on input
+            if input.left {
+                player.vel_x -= PLAYER_SPEED;
+            }
+            if input.right {
+                player.vel_x += PLAYER_SPEED;
+            }
 
-        result
-    }
-
-    pub fn get_player_seqs(&self) -> Vec<(usize, SeqInfo)> {
-        self.players
-            .iter()
-            .map(|p| {
-                (
-                    p.id,
-                    SeqInfo {
-                        last_seq: p.last_seq,
-                    },
-                )
-            })
-            .collect()
-    }
-
-    pub fn set_player_max_speed(&mut self, id: usize, speed: f32) {
-        if let Some(player) = self.players.iter_mut().find(|p| p.id == id) {
-            player.object.max_speed = speed;
-        }
-    }
-
-    pub fn set_player_gravity(&mut self, id: usize, gravity: f32) {
-        if let Some(player) = self.players.iter_mut().find(|p| p.id == id) {
-            player.object.gravity = gravity;
-        }
-    }
-
-    pub fn set_player_acceleration_speed(&mut self, id: usize, speed: f32) {
-        if let Some(player) = self.players.iter_mut().find(|p| p.id == id) {
-            player.acceleration_speed = speed;
-        }
-    }
-
-    pub fn set_player_jump_speed(&mut self, id: usize, speed: f32) {
-        if let Some(player) = self.players.iter_mut().find(|p| p.id == id) {
-            player.jump_speed = speed;
-        }
-    }
-
-    pub fn update_player_input(&mut self, id: usize, input: PlayerInputState) {
-        if let Some(player) = self.players.iter_mut().find(|p| p.id == id) {
-            // Only update if seq is newer
-            if input.seq > player.last_seq {
-                player.input_state = input.clone();
-                player.last_seq = input.seq;
+            // Apply jump only when on ground to prevent double jumping
+            if input.jump && player.on_ground {
+                player.vel_y = JUMP_VELOCITY;
+                player.on_ground = false;
             }
         }
     }
 
-    pub fn update_positions(&mut self, dt: f32) {
-        for player in &mut self.players {
-            // Horizontal movement
-            if player.input_state.left && !player.input_state.right {
-                player.object.acceleration.x = -player.acceleration_speed;
-            } else if player.input_state.right && !player.input_state.left {
-                player.object.acceleration.x = player.acceleration_speed;
-            } else {
-                player.object.acceleration.x = 0.0;
-                player.object.velocity.x = 0.0;
+    /// Updates physics simulation for all players using fixed timestep
+    ///
+    /// Applies physics forces (gravity), updates positions based on velocity,
+    /// enforces world boundaries, and handles ground/ceiling collisions.
+    /// Uses deterministic fixed timestep to ensure identical simulation
+    /// results across server and client prediction.
+    pub fn update_physics(&mut self, dt: f32) {
+        for player in self.players.values_mut() {
+            // Apply gravity when not on ground
+            if !player.on_ground {
+                player.vel_y += GRAVITY * dt;
             }
 
-            // Vertical movement
-            // Only allow jump if grounded
-            if player.input_state.up && !player.input_state.down && player.grounded {
-                player.object.velocity.y = player.jump_speed;
-            } else if !player.input_state.up && player.object.velocity.y > 0.0 {
-                player.object.velocity.y = 0.0;
+            // Update position based on velocity
+            player.x += player.vel_x * dt;
+            player.y += player.vel_y * dt;
+
+            // Enforce horizontal world boundaries
+            player.x = player.x.clamp(0.0, WORLD_WIDTH - PLAYER_SIZE);
+
+            // Handle floor collision
+            if player.y + PLAYER_SIZE >= FLOOR_Y {
+                player.y = FLOOR_Y - PLAYER_SIZE;
+                player.vel_y = 0.0;
+                player.on_ground = true;
             }
 
-            // Simulate movement
-            player.object.simulate(dt);
+            // Handle ceiling collision
+            if player.y <= 0.0 {
+                player.y = 0.0;
+                player.vel_y = 0.0;
+            }
+        }
 
-            player.grounded = false;
+        // Process player-to-player collisions
+        self.handle_collisions();
+    }
 
-            // Check and resolve collisions
-            for object in &self.objects {
-                player.object.resolve_collision(object);
+    /// Handles collision detection and resolution between all players
+    ///
+    /// Iterates through all player pairs to detect overlaps and applies
+    /// collision resolution using the shared collision system. This ensures
+    /// players cannot occupy the same space and creates realistic physics
+    /// interactions between players.
+    fn handle_collisions(&mut self) {
+        let player_ids: Vec<u32> = self.players.keys().cloned().collect();
 
-                // Check if grounded
-                if player.object.is_grounded(object) {
-                    player.grounded = true;
+        // Check all pairs of players for collisions
+        for i in 0..player_ids.len() {
+            for j in (i + 1)..player_ids.len() {
+                let id1 = player_ids[i];
+                let id2 = player_ids[j];
+
+                // Get player copies for collision processing
+                if let (Some(p1), Some(p2)) = (
+                    self.players.get(&id1).cloned(),
+                    self.players.get(&id2).cloned(),
+                ) {
+                    let mut player1 = p1;
+                    let mut player2 = p2;
+
+                    // Apply collision resolution from shared module
+                    resolve_collision(&mut player1, &mut player2);
+
+                    // Update players with resolved positions
+                    self.players.insert(id1, player1);
+                    self.players.insert(id2, player2);
                 }
             }
         }
-        for object in &mut self.objects {
-            object.simulate(dt);
-        }
+    }
+}
+
+impl Default for GameState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assert_approx_eq::assert_approx_eq;
+    use shared::{InputState, FLOOR_Y, PLAYER_SIZE};
+
+    #[test]
+    fn test_game_state_creation() {
+        let game_state = GameState::new();
+        assert_eq!(game_state.tick, 0);
+        assert!(game_state.players.is_empty());
     }
 
-    pub fn add_static_object(&mut self, position: Vector2, width: f32, height: f32) {
-        let object = Object {
-            is_static: true,
-            width: width,
-            height: height,
-            position,
-            velocity: Vector2 { x: 0.0, y: 0.0 },
-            acceleration: Vector2 { x: 0.0, y: 0.0 },
-            max_speed: 0.0,
-            gravity: 0.0,
+    #[test]
+    fn test_add_player() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+
+        assert_eq!(game_state.players.len(), 1);
+        assert!(game_state.players.contains_key(&1));
+
+        let player = game_state.players.get(&1).unwrap();
+        assert_eq!(player.id, 1);
+        assert_eq!(player.y, FLOOR_Y - PLAYER_SIZE);
+        assert!(player.on_ground);
+    }
+
+    #[test]
+    fn test_add_multiple_players() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+        game_state.add_player(2);
+        game_state.add_player(3);
+
+        assert_eq!(game_state.players.len(), 3);
+
+        let player1_x = game_state.players.get(&1).unwrap().x;
+        let player2_x = game_state.players.get(&2).unwrap().x;
+        let player3_x = game_state.players.get(&3).unwrap().x;
+
+        assert_ne!(player1_x, player2_x);
+        assert_ne!(player2_x, player3_x);
+    }
+
+    #[test]
+    fn test_remove_player() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+        game_state.add_player(2);
+
+        assert_eq!(game_state.players.len(), 2);
+
+        game_state.remove_player(&1);
+        assert_eq!(game_state.players.len(), 1);
+        assert!(!game_state.players.contains_key(&1));
+        assert!(game_state.players.contains_key(&2));
+    }
+
+    #[test]
+    fn test_apply_input_movement() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+
+        let input = InputState {
+            sequence: 1,
+            timestamp: 0,
+            left: true,
+            right: false,
+            jump: false,
         };
-        self.objects.push(object);
+
+        game_state.apply_input(1, &input, 1.0 / 60.0);
+
+        let player = game_state.players.get(&1).unwrap();
+        assert_eq!(player.vel_x, -PLAYER_SPEED);
+    }
+
+    #[test]
+    fn test_apply_input_jump() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+
+        let input = InputState {
+            sequence: 1,
+            timestamp: 0,
+            left: false,
+            right: false,
+            jump: true,
+        };
+
+        game_state.apply_input(1, &input, 1.0 / 60.0);
+
+        let player = game_state.players.get(&1).unwrap();
+        assert_eq!(player.vel_y, JUMP_VELOCITY);
+        assert!(!player.on_ground);
+    }
+
+    #[test]
+    fn test_apply_input_no_double_jump() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+
+        let input = InputState {
+            sequence: 1,
+            timestamp: 0,
+            left: false,
+            right: false,
+            jump: true,
+        };
+
+        game_state.apply_input(1, &input, 1.0 / 60.0);
+        let player = game_state.players.get(&1).unwrap();
+        let first_vel_y = player.vel_y;
+
+        game_state.apply_input(1, &input, 1.0 / 60.0);
+        let player = game_state.players.get(&1).unwrap();
+        assert_eq!(player.vel_y, first_vel_y);
+    }
+
+    #[test]
+    fn test_update_physics_gravity() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+
+        let input = InputState {
+            sequence: 1,
+            timestamp: 0,
+            left: false,
+            right: false,
+            jump: true,
+        };
+
+        game_state.apply_input(1, &input, 1.0 / 60.0);
+        let initial_vel_y = game_state.players.get(&1).unwrap().vel_y;
+
+        let dt = 1.0 / 60.0;
+        game_state.update_physics(dt);
+
+        let player = game_state.players.get(&1).unwrap();
+        let expected_vel_y = initial_vel_y + GRAVITY * dt;
+        assert_approx_eq!(player.vel_y, expected_vel_y, 0.001);
+    }
+
+    #[test]
+    fn test_update_physics_horizontal_movement() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+
+        let initial_x = game_state.players.get(&1).unwrap().x;
+
+        if let Some(player) = game_state.players.get_mut(&1) {
+            player.vel_x = PLAYER_SPEED;
+        }
+
+        let dt = 1.0 / 60.0;
+        game_state.update_physics(dt);
+
+        let player = game_state.players.get(&1).unwrap();
+        let expected_x = initial_x + PLAYER_SPEED * dt;
+        assert_approx_eq!(player.x, expected_x, 0.001);
+    }
+
+    #[test]
+    fn test_update_physics_boundary_clamping() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+
+        if let Some(player) = game_state.players.get_mut(&1) {
+            player.x = -10.0;
+            player.vel_x = -PLAYER_SPEED;
+        }
+
+        let dt = 1.0 / 60.0;
+        game_state.update_physics(dt);
+
+        let player = game_state.players.get(&1).unwrap();
+        assert_eq!(player.x, 0.0);
+    }
+
+    #[test]
+    fn test_update_physics_floor_collision() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+
+        if let Some(player) = game_state.players.get_mut(&1) {
+            player.y = FLOOR_Y + 10.0;
+            player.vel_y = 100.0;
+            player.on_ground = false;
+        }
+
+        let dt = 1.0 / 60.0;
+        game_state.update_physics(dt);
+
+        let player = game_state.players.get(&1).unwrap();
+        assert_eq!(player.y, FLOOR_Y - PLAYER_SIZE);
+        assert_eq!(player.vel_y, 0.0);
+        assert!(player.on_ground);
+    }
+
+    #[test]
+    fn test_update_physics_ceiling_collision() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+
+        if let Some(player) = game_state.players.get_mut(&1) {
+            player.y = -10.0;
+            player.vel_y = -100.0;
+        }
+
+        let dt = 1.0 / 60.0;
+        game_state.update_physics(dt);
+
+        let player = game_state.players.get(&1).unwrap();
+        assert_eq!(player.y, 0.0);
+        assert_eq!(player.vel_y, 0.0);
     }
 }
