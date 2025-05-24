@@ -106,8 +106,8 @@ Want to try the netcode immediately? Connect to our live demo server:
 
 ```bash
 # Clone and run - connects to game.conrados.dev:8080
-git clone https://github.com/yourusername/netcode-rust-workspace.git
-cd netcode-rust-workspace
+git clone https://github.com/jakobhuuse/Netcode-in-Rust.git
+cd Netcode-in-Rust
 cargo run -p client -- --server game.conrados.dev:8080
 ```
 
@@ -121,8 +121,8 @@ cargo run -p client -- --server game.conrados.dev:8080
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/netcode-rust-workspace.git
-cd netcode-rust-workspace
+git clone https://github.com/jakobhuuse/Netcode-in-Rust.git
+cd Netcode-in-Rust
 
 # Build all components (server, client, shared library)
 make build
