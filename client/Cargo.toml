@@ -1,0 +1,26 @@
+[package]
+name = "client"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "client"
+path = "src/lib.rs"
+
+[[bin]]
+name = "client"
+path = "src/main.rs"
+
+[dependencies]
+shared = { path = "../shared" }
+tokio = { workspace = true }
+serde = { workspace = true }
+bincode = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+clap = { workspace = true }
+macroquad = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+assert_approx_eq = { workspace = true }
