@@ -3,11 +3,10 @@ use crate::input::InputManager;
 use crate::rendering::Renderer;
 use bincode::{deserialize, serialize};
 use log::{error, info, warn};
+use macroquad::prelude::*;
 use shared::{InputState, Packet};
-use std::net::SocketAddr;
+use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
-use tokio::net::UdpSocket;
-use tokio::time::{interval, sleep};
 
 pub struct Client {
     socket: UdpSocket,
@@ -21,7 +20,7 @@ pub struct Client {
 
     ping_ms: u64,
     fake_ping_ms: u64,
-    last_ping_time: Instant,
+    _last_ping_time: Instant,
 
     prediction_enabled: bool,
     reconciliation_enabled: bool,
@@ -35,7 +34,8 @@ impl Client {
         width: usize,
         height: usize,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let socket = UdpSocket::bind("0.0.0.0:0").await?;
+        let socket = UdpSocket::bind("0.0.0.0:0")?;
+        socket.set_nonblocking(true)?;
         let server_addr = server_addr.parse()?;
 
         let renderer = Renderer::new(width, height)?;
@@ -50,7 +50,7 @@ impl Client {
             renderer,
             ping_ms: 0,
             fake_ping_ms,
-            last_ping_time: Instant::now(),
+            _last_ping_time: Instant::now(),
             prediction_enabled: true,
             reconciliation_enabled: true,
             interpolation_enabled: true,
@@ -67,16 +67,21 @@ impl Client {
     }
 
     async fn send_packet(&self, packet: &Packet) -> Result<(), Box<dyn std::error::Error>> {
+        let data = serialize(packet)?;
+
         if self.fake_ping_ms > 0 {
-            sleep(Duration::from_millis(self.fake_ping_ms / 2)).await;
+            let delay_ms = self.fake_ping_ms / 2;
+            let start = get_time();
+            while (get_time() - start) < (delay_ms as f64 / 1000.0) {
+                next_frame().await;
+            }
         }
 
-        let data = serialize(packet)?;
-        self.socket.send_to(&data, self.server_addr).await?;
+        self.socket.send_to(&data, self.server_addr)?;
         Ok(())
     }
 
-    async fn handle_packet(&mut self, packet: Packet, receive_time: Instant) {
+    async fn handle_packet(&mut self, packet: Packet, _receive_time: Instant) {
         match packet {
             Packet::Connected { client_id } => {
                 info!("Connected! Client ID: {}", client_id);
@@ -164,63 +169,76 @@ impl Client {
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         self.connect().await?;
 
-        let mut input_interval = interval(Duration::from_millis(16));
-        let mut physics_interval = interval(Duration::from_millis(16));
-        let mut render_interval = interval(Duration::from_millis(16));
+        let mut last_input_time = Instant::now();
+        let mut last_render_time = Instant::now();
+        let input_interval = Duration::from_millis(16);
+        let render_interval = Duration::from_millis(16);
 
         let mut buffer = [0u8; 2048];
 
-        while self.renderer.is_open() {
-            tokio::select! {
-                result = self.socket.recv_from(&mut buffer) => {
+        loop {
+            match self.socket.recv_from(&mut buffer) {
+                Ok((len, _)) => {
                     let receive_time = Instant::now();
-                    match result {
-                        Ok((len, _)) => {
-                            if self.fake_ping_ms > 0 {
-                                sleep(Duration::from_millis(self.fake_ping_ms / 2)).await;
-                            }
-
-                            if let Ok(packet) = deserialize::<Packet>(&buffer[0..len]) {
-                                self.handle_packet(packet, receive_time).await;
-                            }
-                        },
-                        Err(e) => error!("Error receiving packet: {}", e),
-                    }
-                },
-
-                _ = input_interval.tick() => {
-                    let (toggles, input_to_send) = self.input_manager.update(&self.renderer.window);
-
-                    self.handle_toggles(toggles);
-
-                    if let Some(input) = input_to_send {
-                        if let Err(e) = self.send_input(input).await {
-                            error!("Error sending input: {}", e);
+                    if self.fake_ping_ms > 0 {
+                        let delay_ms = self.fake_ping_ms / 2;
+                        let start = get_time();
+                        while (get_time() - start) < (delay_ms as f64 / 1000.0) {
+                            next_frame().await;
                         }
                     }
-                },
 
-                _ = physics_interval.tick() => {
+                    if let Ok(packet) = deserialize::<Packet>(&buffer[0..len]) {
+                        self.handle_packet(packet, receive_time).await;
+                    }
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(e) => {
+                    error!("Error receiving packet: {}", e);
+                }
+            }
+
+            if last_input_time.elapsed() >= input_interval {
+                let (toggles, input_to_send) = self.input_manager.update();
+
+                self.handle_toggles(toggles);
+
+                if let Some(input) = input_to_send {
+                    if let Err(e) = self.send_input(input).await {
+                        error!("Error sending input: {}", e);
+                    }
+                }
+                last_input_time = Instant::now();
+            }
+
+            if last_render_time.elapsed() >= render_interval {
+                if !self.prediction_enabled {
                     let dt = 1.0 / 60.0;
                     self.game_state.update_physics(dt);
-                },
+                }
 
-                _ = render_interval.tick() => {
-                    let players = self.game_state.get_render_players(
-                        self.client_id,
-                        self.interpolation_enabled,
-                    );
+                let players = self.game_state.get_render_players(
+                    self.client_id,
+                    self.prediction_enabled,
+                    self.interpolation_enabled,
+                );
 
-                    self.renderer.render(
-                        &players,
-                        self.client_id,
-                        self.prediction_enabled,
-                        self.reconciliation_enabled,
-                        self.interpolation_enabled,
-                        self.ping_ms,
-                        self.fake_ping_ms,
-                    );
-                },
+                self.renderer.render(
+                    &players,
+                    self.client_id,
+                    self.prediction_enabled,
+                    self.reconciliation_enabled,
+                    self.interpolation_enabled,
+                    self.ping_ms,
+                    self.fake_ping_ms,
+                );
+
+                last_render_time = Instant::now();
+                next_frame().await;
+            }
+
+            if is_quit_requested() {
+                break;
             }
         }
 

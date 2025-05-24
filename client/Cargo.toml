@@ -11,4 +11,4 @@ bincode = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 clap = { workspace = true }
-minifb = { workspace = true }
+macroquad = { workspace = true }

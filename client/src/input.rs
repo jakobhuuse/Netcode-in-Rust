@@ -1,5 +1,4 @@
-use log::info;
-use minifb::{Key, Window};
+use macroquad::prelude::*;
 use shared::InputState;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -31,16 +30,14 @@ impl InputManager {
         }
     }
 
-    pub fn update(&mut self, window: &Window) -> ((bool, bool, bool), Option<InputState>) {
-        let keys = window.get_keys();
+    pub fn update(&mut self) -> ((bool, bool, bool), Option<InputState>) {
+        let left = is_key_down(KeyCode::A) || is_key_down(KeyCode::Left);
+        let right = is_key_down(KeyCode::D) || is_key_down(KeyCode::Right);
+        let jump = is_key_down(KeyCode::Space);
 
-        let left = keys.contains(&Key::A) || keys.contains(&Key::Left);
-        let right = keys.contains(&Key::D) || keys.contains(&Key::Right);
-        let jump = keys.contains(&Key::Space);
-
-        let key_1 = keys.contains(&Key::Key1);
-        let key_2 = keys.contains(&Key::Key2);
-        let key_3 = keys.contains(&Key::Key3);
+        let key_1 = is_key_down(KeyCode::Key1);
+        let key_2 = is_key_down(KeyCode::Key2);
+        let key_3 = is_key_down(KeyCode::Key3);
 
         let mut toggles = (false, false, false);
 
@@ -82,10 +79,6 @@ impl InputManager {
         }
 
         (toggles, input_to_send)
-    }
-
-    pub fn get_current_input(&self) -> &InputState {
-        &self.current_input
     }
 
     fn get_timestamp() -> u64 {

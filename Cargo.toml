@@ -1,5 +1,6 @@
 [workspace]
 members = ["server", "client", "shared"]
+resolver = "2"
 
 [workspace.dependencies]
 tokio = { version = "1.28.0", features = ["full"] }
@@ -9,4 +10,4 @@ log = "0.4"
 env_logger = "0.10.0"
 clap = { version = "4.2.1", features = ["derive"] }
 rand = "0.8"
-minifb = "0.25"
+macroquad = "0.4"

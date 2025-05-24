@@ -1,7 +1,7 @@
 use log::debug;
 use shared::{
     resolve_collision, InputState, Player, FLOOR_Y, GRAVITY, JUMP_VELOCITY, PLAYER_SIZE,
-    PLAYER_SPEED, WORLD_HEIGHT, WORLD_WIDTH,
+    PLAYER_SPEED, WORLD_WIDTH,
 };
 use std::collections::HashMap;
 
@@ -19,7 +19,7 @@ impl GameState {
         }
     }
 
-    pub fn apply_input(&mut self, client_id: u32, input: &InputState, dt: f32) {
+    pub fn apply_input(&mut self, client_id: u32, input: &InputState, _dt: f32) {
         if let Some(player) = self.players.get_mut(&client_id) {
             player.vel_x = 0.0;
             if input.left {
@@ -98,6 +98,8 @@ pub struct ClientGameState {
     pub input_history: Vec<InputState>,
     pub last_confirmed_tick: u32,
     pub interpolation_buffer: Vec<(u64, Vec<Player>)>,
+    pub physics_accumulator: f32,
+    pub fixed_timestep: f32,
 }
 
 impl ClientGameState {
@@ -108,6 +110,8 @@ impl ClientGameState {
             input_history: Vec::new(),
             last_confirmed_tick: 0,
             interpolation_buffer: Vec::new(),
+            physics_accumulator: 0.0,
+            fixed_timestep: 1.0 / 60.0,
         }
     }
 
@@ -141,14 +145,21 @@ impl ClientGameState {
 
         if interpolation_enabled {
             self.interpolation_buffer.push((timestamp, players));
-
-            let cutoff = timestamp.saturating_sub(500);
+            let cutoff = timestamp.saturating_sub(1000);
             self.interpolation_buffer.retain(|(ts, _)| *ts > cutoff);
         }
 
         if reconciliation_enabled {
             if let Some(client_id) = client_id {
                 self.perform_reconciliation(client_id, last_processed_input);
+            }
+        } else {
+            if let Some(client_id) = client_id {
+                if let Some(confirmed_player) = self.confirmed_state.players.get(&client_id) {
+                    self.predicted_state
+                        .players
+                        .insert(client_id, confirmed_player.clone());
+                }
             }
         }
 
@@ -157,8 +168,14 @@ impl ClientGameState {
 
     fn perform_reconciliation(&mut self, client_id: u32, last_processed_input: HashMap<u32, u32>) {
         if let Some(&last_processed_seq) = last_processed_input.get(&client_id) {
+            let initial_history_len = self.input_history.len();
             self.input_history
                 .retain(|input| input.sequence > last_processed_seq);
+
+            debug!(
+                "Removed {} processed inputs from history",
+                initial_history_len - self.input_history.len()
+            );
 
             let confirmed_player = self.confirmed_state.players.get(&client_id);
             let predicted_player = self.predicted_state.players.get(&client_id);
@@ -168,15 +185,16 @@ impl ClientGameState {
                 let dy = confirmed.y - predicted.y;
                 let distance = (dx * dx + dy * dy).sqrt();
 
-                if distance > 5.0 {
+                if distance > 1.0 {
                     debug!("Rollback needed! Distance: {:.2}", distance);
 
                     self.predicted_state = self.confirmed_state.clone();
+                    self.predicted_state.tick = self.confirmed_state.tick;
 
-                    let dt = 1.0 / 60.0;
                     for input in &self.input_history {
-                        self.predicted_state.apply_input(client_id, input, dt);
-                        self.predicted_state.step(dt);
+                        self.predicted_state
+                            .apply_input(client_id, input, self.fixed_timestep);
+                        self.predicted_state.step(self.fixed_timestep);
                     }
                 }
             }
@@ -186,17 +204,27 @@ impl ClientGameState {
     pub fn apply_prediction(&mut self, client_id: u32, input: &InputState) {
         self.input_history.push(input.clone());
 
-        let dt = 1.0 / 60.0;
-        self.predicted_state.apply_input(client_id, input, dt);
+        if self.input_history.len() > 1000 {
+            self.input_history.drain(0..100);
+        }
+
+        self.predicted_state
+            .apply_input(client_id, input, self.fixed_timestep);
+        self.predicted_state.step(self.fixed_timestep);
     }
 
     pub fn update_physics(&mut self, dt: f32) {
-        self.predicted_state.step(dt);
+        self.physics_accumulator += dt;
+
+        while self.physics_accumulator >= self.fixed_timestep {
+            self.physics_accumulator -= self.fixed_timestep;
+        }
     }
 
     pub fn get_render_players(
         &self,
         client_id: Option<u32>,
+        prediction_enabled: bool,
         interpolation_enabled: bool,
     ) -> Vec<Player> {
         if interpolation_enabled {
@@ -205,8 +233,14 @@ impl ClientGameState {
             let mut players = Vec::new();
 
             if let Some(client_id) = client_id {
-                if let Some(our_player) = self.predicted_state.players.get(&client_id) {
-                    players.push(our_player.clone());
+                if prediction_enabled {
+                    if let Some(our_player) = self.predicted_state.players.get(&client_id) {
+                        players.push(our_player.clone());
+                    }
+                } else {
+                    if let Some(our_player) = self.confirmed_state.players.get(&client_id) {
+                        players.push(our_player.clone());
+                    }
                 }
 
                 for (id, player) in &self.confirmed_state.players {
@@ -224,7 +258,7 @@ impl ClientGameState {
 
     fn get_interpolated_players(&self, client_id: Option<u32>) -> Vec<Player> {
         if self.interpolation_buffer.len() < 2 {
-            return self.get_render_players(client_id, false);
+            return self.get_render_players(client_id, false, false);
         }
 
         let now = std::time::SystemTime::now()
@@ -232,22 +266,26 @@ impl ClientGameState {
             .unwrap_or(std::time::Duration::from_secs(0))
             .as_millis() as u64;
 
-        let render_time = now.saturating_sub(100);
+        let render_time = now.saturating_sub(150);
 
         let mut before = None;
         let mut after = None;
 
-        for (timestamp, players) in &self.interpolation_buffer {
+        for i in 0..self.interpolation_buffer.len() {
+            let (timestamp, _) = &self.interpolation_buffer[i];
             if *timestamp <= render_time {
-                before = Some((*timestamp, players));
+                before = Some(i);
             } else {
-                after = Some((*timestamp, players));
+                after = Some(i);
                 break;
             }
         }
 
         match (before, after) {
-            (Some((t1, players1)), Some((t2, players2))) => {
+            (Some(before_idx), Some(after_idx)) => {
+                let (t1, players1) = &self.interpolation_buffer[before_idx];
+                let (t2, players2) = &self.interpolation_buffer[after_idx];
+
                 let alpha = if t2 > t1 {
                     ((render_time - t1) as f32) / ((t2 - t1) as f32)
                 } else {
@@ -278,7 +316,8 @@ impl ClientGameState {
                 }
                 result
             }
-            (Some((_, players)), None) => {
+            (Some(before_idx), None) => {
+                let (_, players) = &self.interpolation_buffer[before_idx];
                 let mut result = players.clone();
                 if let Some(client_id) = client_id {
                     if let Some(our_player) = self.predicted_state.players.get(&client_id) {
@@ -289,7 +328,7 @@ impl ClientGameState {
                 }
                 result
             }
-            _ => self.get_render_players(client_id, false),
+            _ => self.get_render_players(client_id, false, false),
         }
     }
 }

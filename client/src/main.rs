@@ -5,28 +5,34 @@ mod rendering;
 
 use clap::Parser;
 use log::info;
+use macroquad::prelude::*;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Server address to connect to
     #[arg(short = 's', long, default_value = "127.0.0.1:8080")]
     server: String,
 
-    /// Simulate network latency in milliseconds
     #[arg(short = 'l', long, default_value = "0")]
     fake_ping: u64,
 
-    /// Window width
     #[arg(short = 'w', long, default_value = "800")]
     width: usize,
 
-    /// Window height (no short flag to avoid conflict with --help)
     #[arg(long, default_value = "600")]
     height: usize,
 }
 
-#[tokio::main]
+fn window_conf() -> Conf {
+    Conf {
+        window_title: "Netcode in Rust - Client".to_owned(),
+        window_width: 800,
+        window_height: 600,
+        ..Default::default()
+    }
+}
+
+#[macroquad::main(window_conf)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
