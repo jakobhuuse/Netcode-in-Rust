@@ -1,3 +1,8 @@
+[package]
+name = "netcode-rust-workspace"
+version = "0.1.0"
+edition = "2021"
+
 [workspace]
 members = ["server", "client", "shared"]
 resolver = "2"
@@ -11,3 +16,24 @@ env_logger = "0.10.0"
 clap = { version = "4.2.1", features = ["derive"] }
 rand = "0.8"
 macroquad = "0.4"
+tokio-test = "0.4"
+assert_approx_eq = "1.1.0"
+
+# Dependencies for integration tests (workspace root needs these)
+[dependencies]
+shared = { path = "shared" }
+tokio = { workspace = true }
+serde = { workspace = true }
+bincode = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+assert_approx_eq = { workspace = true }
+
+[[test]]
+name = "integration_tests"
+path = "tests/integration_tests.rs"
+
+[[test]]
+name = "benchmark_tests"
+path = "tests/benchmark_tests.rs"

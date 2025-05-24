@@ -95,3 +95,50 @@ impl InputManager {
             .as_millis() as u64
     }
 }
+
+impl Default for InputManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_input_manager_creation() {
+        let input_manager = InputManager::new();
+        assert_eq!(input_manager.next_sequence, 1);
+        assert_eq!(input_manager.current_input.sequence, 0);
+        assert!(!input_manager.current_input.left);
+        assert!(!input_manager.current_input.right);
+        assert!(!input_manager.current_input.jump);
+    }
+
+    #[test]
+    fn test_get_timestamp() {
+        let timestamp1 = InputManager::get_timestamp();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        let timestamp2 = InputManager::get_timestamp();
+
+        assert!(timestamp2 > timestamp1);
+    }
+
+    #[test]
+    fn test_sequence_increment() {
+        let mut input_manager = InputManager::new();
+        assert_eq!(input_manager.next_sequence, 1);
+
+        input_manager.current_input = InputState {
+            sequence: input_manager.next_sequence,
+            timestamp: InputManager::get_timestamp(),
+            left: true,
+            right: false,
+            jump: false,
+        };
+
+        input_manager.next_sequence += 1;
+        assert_eq!(input_manager.next_sequence, 2);
+    }
+}

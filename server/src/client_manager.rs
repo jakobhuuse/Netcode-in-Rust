@@ -157,3 +157,237 @@ impl ClientManager {
         self.clients.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn test_addr() -> SocketAddr {
+        "127.0.0.1:8080".parse().unwrap()
+    }
+
+    fn test_addr2() -> SocketAddr {
+        "127.0.0.1:8081".parse().unwrap()
+    }
+
+    #[test]
+    fn test_client_creation() {
+        let addr = test_addr();
+        let client = Client::new(1, addr);
+
+        assert_eq!(client.id, 1);
+        assert_eq!(client.addr, addr);
+        assert_eq!(client.last_processed_input, 0);
+        assert!(client.pending_inputs.is_empty());
+    }
+
+    #[test]
+    fn test_client_add_input() {
+        let addr = test_addr();
+        let mut client = Client::new(1, addr);
+
+        let input1 = InputState {
+            sequence: 2,
+            timestamp: 100,
+            left: true,
+            right: false,
+            jump: false,
+        };
+
+        let input2 = InputState {
+            sequence: 1,
+            timestamp: 50,
+            left: false,
+            right: true,
+            jump: false,
+        };
+
+        client.add_input(input1);
+        client.add_input(input2);
+
+        assert_eq!(client.pending_inputs.len(), 2);
+        assert_eq!(client.pending_inputs[0].sequence, 1);
+        assert_eq!(client.pending_inputs[1].sequence, 2);
+    }
+
+    #[test]
+    fn test_client_timeout() {
+        let addr = test_addr();
+        let mut client = Client::new(1, addr);
+
+        assert!(!client.is_timed_out(Duration::from_secs(1)));
+
+        client.last_seen = std::time::Instant::now() - Duration::from_secs(2);
+
+        assert!(client.is_timed_out(Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn test_client_manager_creation() {
+        let manager = ClientManager::new(5);
+        assert_eq!(manager.max_clients, 5);
+        assert!(manager.is_empty());
+        assert_eq!(manager.len(), 0);
+    }
+
+    #[test]
+    fn test_add_client() {
+        let mut manager = ClientManager::new(2);
+        let addr = test_addr();
+
+        let client_id = manager.add_client(addr).unwrap();
+        assert_eq!(client_id, 1);
+        assert_eq!(manager.len(), 1);
+        assert!(!manager.is_empty());
+    }
+
+    #[test]
+    fn test_add_multiple_clients() {
+        let mut manager = ClientManager::new(3);
+        let addr1 = test_addr();
+        let addr2 = test_addr2();
+
+        let client_id1 = manager.add_client(addr1).unwrap();
+        let client_id2 = manager.add_client(addr2).unwrap();
+
+        assert_eq!(client_id1, 1);
+        assert_eq!(client_id2, 2);
+        assert_eq!(manager.len(), 2);
+    }
+
+    #[test]
+    fn test_add_client_max_capacity() {
+        let mut manager = ClientManager::new(1);
+        let addr1 = test_addr();
+        let addr2 = test_addr2();
+
+        let client_id1 = manager.add_client(addr1);
+        assert!(client_id1.is_some());
+        assert_eq!(manager.len(), 1);
+
+        let client_id2 = manager.add_client(addr2);
+        assert!(client_id2.is_none());
+        assert_eq!(manager.len(), 1);
+    }
+
+    #[test]
+    fn test_remove_client() {
+        let mut manager = ClientManager::new(2);
+        let addr = test_addr();
+
+        let client_id = manager.add_client(addr).unwrap();
+        assert_eq!(manager.len(), 1);
+
+        let removed = manager.remove_client(&client_id);
+        assert!(removed);
+        assert_eq!(manager.len(), 0);
+        assert!(manager.is_empty());
+    }
+
+    #[test]
+    fn test_remove_nonexistent_client() {
+        let mut manager = ClientManager::new(2);
+
+        let removed = manager.remove_client(&999);
+        assert!(!removed);
+        assert_eq!(manager.len(), 0);
+    }
+
+    #[test]
+    fn test_find_client_by_addr() {
+        let mut manager = ClientManager::new(2);
+        let addr1 = test_addr();
+        let addr2 = test_addr2();
+
+        let client_id1 = manager.add_client(addr1).unwrap();
+        let _client_id2 = manager.add_client(addr2).unwrap();
+
+        let found_id = manager.find_client_by_addr(addr1);
+        assert_eq!(found_id, Some(client_id1));
+
+        let unknown_addr: SocketAddr = "192.168.1.1:9999".parse().unwrap();
+        let not_found = manager.find_client_by_addr(unknown_addr);
+        assert_eq!(not_found, None);
+    }
+
+    #[test]
+    fn test_add_input_to_client() {
+        let mut manager = ClientManager::new(2);
+        let addr = test_addr();
+
+        let client_id = manager.add_client(addr).unwrap();
+
+        let input = InputState {
+            sequence: 1,
+            timestamp: 100,
+            left: true,
+            right: false,
+            jump: false,
+        };
+
+        let success = manager.add_input(client_id, input);
+        assert!(success);
+    }
+
+    #[test]
+    fn test_add_input_to_nonexistent_client() {
+        let mut manager = ClientManager::new(2);
+
+        let input = InputState {
+            sequence: 1,
+            timestamp: 100,
+            left: true,
+            right: false,
+            jump: false,
+        };
+
+        let success = manager.add_input(999, input);
+        assert!(!success);
+    }
+
+    #[test]
+    fn test_get_chronological_inputs() {
+        let mut manager = ClientManager::new(3);
+        let addr1 = test_addr();
+        let addr2 = test_addr2();
+
+        let client_id1 = manager.add_client(addr1).unwrap();
+        let client_id2 = manager.add_client(addr2).unwrap();
+
+        let input1 = InputState {
+            sequence: 1,
+            timestamp: 100,
+            left: true,
+            right: false,
+            jump: false,
+        };
+
+        let input2 = InputState {
+            sequence: 1,
+            timestamp: 50,
+            left: false,
+            right: true,
+            jump: false,
+        };
+
+        let input3 = InputState {
+            sequence: 2,
+            timestamp: 200,
+            left: false,
+            right: false,
+            jump: true,
+        };
+
+        manager.add_input(client_id1, input1);
+        manager.add_input(client_id2, input2);
+        manager.add_input(client_id1, input3);
+
+        let chronological_inputs = manager.get_chronological_inputs();
+
+        assert_eq!(chronological_inputs.len(), 3);
+        assert_eq!(chronological_inputs[0].1.timestamp, 50);
+        assert_eq!(chronological_inputs[1].1.timestamp, 100);
+        assert_eq!(chronological_inputs[2].1.timestamp, 200);
+    }
+}

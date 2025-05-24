@@ -101,3 +101,227 @@ impl GameState {
         }
     }
 }
+
+impl Default for GameState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assert_approx_eq::assert_approx_eq;
+    use shared::{InputState, FLOOR_Y, PLAYER_SIZE};
+
+    #[test]
+    fn test_game_state_creation() {
+        let game_state = GameState::new();
+        assert_eq!(game_state.tick, 0);
+        assert!(game_state.players.is_empty());
+    }
+
+    #[test]
+    fn test_add_player() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+
+        assert_eq!(game_state.players.len(), 1);
+        assert!(game_state.players.contains_key(&1));
+
+        let player = game_state.players.get(&1).unwrap();
+        assert_eq!(player.id, 1);
+        assert_eq!(player.y, FLOOR_Y - PLAYER_SIZE);
+        assert!(player.on_ground);
+    }
+
+    #[test]
+    fn test_add_multiple_players() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+        game_state.add_player(2);
+        game_state.add_player(3);
+
+        assert_eq!(game_state.players.len(), 3);
+
+        let player1_x = game_state.players.get(&1).unwrap().x;
+        let player2_x = game_state.players.get(&2).unwrap().x;
+        let player3_x = game_state.players.get(&3).unwrap().x;
+
+        assert_ne!(player1_x, player2_x);
+        assert_ne!(player2_x, player3_x);
+    }
+
+    #[test]
+    fn test_remove_player() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+        game_state.add_player(2);
+
+        assert_eq!(game_state.players.len(), 2);
+
+        game_state.remove_player(&1);
+        assert_eq!(game_state.players.len(), 1);
+        assert!(!game_state.players.contains_key(&1));
+        assert!(game_state.players.contains_key(&2));
+    }
+
+    #[test]
+    fn test_apply_input_movement() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+
+        let input = InputState {
+            sequence: 1,
+            timestamp: 0,
+            left: true,
+            right: false,
+            jump: false,
+        };
+
+        game_state.apply_input(1, &input, 1.0 / 60.0);
+
+        let player = game_state.players.get(&1).unwrap();
+        assert_eq!(player.vel_x, -PLAYER_SPEED);
+    }
+
+    #[test]
+    fn test_apply_input_jump() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+
+        let input = InputState {
+            sequence: 1,
+            timestamp: 0,
+            left: false,
+            right: false,
+            jump: true,
+        };
+
+        game_state.apply_input(1, &input, 1.0 / 60.0);
+
+        let player = game_state.players.get(&1).unwrap();
+        assert_eq!(player.vel_y, JUMP_VELOCITY);
+        assert!(!player.on_ground);
+    }
+
+    #[test]
+    fn test_apply_input_no_double_jump() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+
+        let input = InputState {
+            sequence: 1,
+            timestamp: 0,
+            left: false,
+            right: false,
+            jump: true,
+        };
+
+        game_state.apply_input(1, &input, 1.0 / 60.0);
+        let player = game_state.players.get(&1).unwrap();
+        let first_vel_y = player.vel_y;
+
+        game_state.apply_input(1, &input, 1.0 / 60.0);
+        let player = game_state.players.get(&1).unwrap();
+        assert_eq!(player.vel_y, first_vel_y);
+    }
+
+    #[test]
+    fn test_update_physics_gravity() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+
+        let input = InputState {
+            sequence: 1,
+            timestamp: 0,
+            left: false,
+            right: false,
+            jump: true,
+        };
+
+        game_state.apply_input(1, &input, 1.0 / 60.0);
+        let initial_vel_y = game_state.players.get(&1).unwrap().vel_y;
+
+        let dt = 1.0 / 60.0;
+        game_state.update_physics(dt);
+
+        let player = game_state.players.get(&1).unwrap();
+        let expected_vel_y = initial_vel_y + GRAVITY * dt;
+        assert_approx_eq!(player.vel_y, expected_vel_y, 0.001);
+    }
+
+    #[test]
+    fn test_update_physics_horizontal_movement() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+
+        let initial_x = game_state.players.get(&1).unwrap().x;
+
+        if let Some(player) = game_state.players.get_mut(&1) {
+            player.vel_x = PLAYER_SPEED;
+        }
+
+        let dt = 1.0 / 60.0;
+        game_state.update_physics(dt);
+
+        let player = game_state.players.get(&1).unwrap();
+        let expected_x = initial_x + PLAYER_SPEED * dt;
+        assert_approx_eq!(player.x, expected_x, 0.001);
+    }
+
+    #[test]
+    fn test_update_physics_boundary_clamping() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+
+        if let Some(player) = game_state.players.get_mut(&1) {
+            player.x = -10.0;
+            player.vel_x = -PLAYER_SPEED;
+        }
+
+        let dt = 1.0 / 60.0;
+        game_state.update_physics(dt);
+
+        let player = game_state.players.get(&1).unwrap();
+        assert_eq!(player.x, 0.0);
+    }
+
+    #[test]
+    fn test_update_physics_floor_collision() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+
+        if let Some(player) = game_state.players.get_mut(&1) {
+            player.y = FLOOR_Y + 10.0;
+            player.vel_y = 100.0;
+            player.on_ground = false;
+        }
+
+        let dt = 1.0 / 60.0;
+        game_state.update_physics(dt);
+
+        let player = game_state.players.get(&1).unwrap();
+        assert_eq!(player.y, FLOOR_Y - PLAYER_SIZE);
+        assert_eq!(player.vel_y, 0.0);
+        assert!(player.on_ground);
+    }
+
+    #[test]
+    fn test_update_physics_ceiling_collision() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+
+        if let Some(player) = game_state.players.get_mut(&1) {
+            player.y = -10.0;
+            player.vel_y = -100.0;
+        }
+
+        let dt = 1.0 / 60.0;
+        game_state.update_physics(dt);
+
+        let player = game_state.players.get(&1).unwrap();
+        assert_eq!(player.y, 0.0);
+        assert_eq!(player.vel_y, 0.0);
+    }
+}

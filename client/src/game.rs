@@ -99,6 +99,12 @@ impl GameState {
     }
 }
 
+impl Default for GameState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct ClientGameState {
     pub confirmed_state: GameState,
     pub predicted_state: GameState,
@@ -331,5 +337,11 @@ impl ClientGameState {
             }
             _ => self.get_render_players(client_id, false, false),
         }
+    }
+}
+
+impl Default for ClientGameState {
+    fn default() -> Self {
+        Self::new()
     }
 }
