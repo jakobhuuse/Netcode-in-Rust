@@ -6,6 +6,13 @@ use shared::{
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
+pub struct ServerStateConfig {
+    pub client_id: Option<u32>,
+    pub reconciliation_enabled: bool,
+    pub interpolation_enabled: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct GameState {
     pub tick: u32,
     pub players: HashMap<u32, Player>,
@@ -45,7 +52,7 @@ impl GameState {
             player.x += player.vel_x * dt;
             player.y += player.vel_y * dt;
 
-            player.x = player.x.max(0.0).min(WORLD_WIDTH - PLAYER_SIZE);
+            player.x = player.x.clamp(0.0, WORLD_WIDTH - PLAYER_SIZE);
 
             if player.y + PLAYER_SIZE >= FLOOR_Y {
                 player.y = FLOOR_Y - PLAYER_SIZE;
@@ -121,9 +128,7 @@ impl ClientGameState {
         timestamp: u64,
         players: Vec<Player>,
         last_processed_input: HashMap<u32, u32>,
-        client_id: Option<u32>,
-        reconciliation_enabled: bool,
-        interpolation_enabled: bool,
+        config: ServerStateConfig,
     ) {
         self.confirmed_state.players.clear();
         for player in &players {
@@ -133,33 +138,31 @@ impl ClientGameState {
         }
         self.confirmed_state.tick = tick;
 
-        if let Some(client_id) = client_id {
-            if !self.predicted_state.players.contains_key(&client_id) {
+        if let Some(client_id) = config.client_id {
+            if let std::collections::hash_map::Entry::Vacant(e) =
+                self.predicted_state.players.entry(client_id)
+            {
                 if let Some(player) = self.confirmed_state.players.get(&client_id) {
-                    self.predicted_state
-                        .players
-                        .insert(client_id, player.clone());
+                    e.insert(player.clone());
                 }
             }
         }
 
-        if interpolation_enabled {
+        if config.interpolation_enabled {
             self.interpolation_buffer.push((timestamp, players));
             let cutoff = timestamp.saturating_sub(1000);
             self.interpolation_buffer.retain(|(ts, _)| *ts > cutoff);
         }
 
-        if reconciliation_enabled {
-            if let Some(client_id) = client_id {
+        if config.reconciliation_enabled {
+            if let Some(client_id) = config.client_id {
                 self.perform_reconciliation(client_id, last_processed_input);
             }
-        } else {
-            if let Some(client_id) = client_id {
-                if let Some(confirmed_player) = self.confirmed_state.players.get(&client_id) {
-                    self.predicted_state
-                        .players
-                        .insert(client_id, confirmed_player.clone());
-                }
+        } else if let Some(client_id) = config.client_id {
+            if let Some(confirmed_player) = self.confirmed_state.players.get(&client_id) {
+                self.predicted_state
+                    .players
+                    .insert(client_id, confirmed_player.clone());
             }
         }
 
@@ -237,10 +240,8 @@ impl ClientGameState {
                     if let Some(our_player) = self.predicted_state.players.get(&client_id) {
                         players.push(our_player.clone());
                     }
-                } else {
-                    if let Some(our_player) = self.confirmed_state.players.get(&client_id) {
-                        players.push(our_player.clone());
-                    }
+                } else if let Some(our_player) = self.confirmed_state.players.get(&client_id) {
+                    players.push(our_player.clone());
                 }
 
                 for (id, player) in &self.confirmed_state.players {

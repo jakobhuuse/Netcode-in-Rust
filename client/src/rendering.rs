@@ -1,6 +1,27 @@
 use macroquad::prelude::*;
 use shared::{Player, FLOOR_Y, PLAYER_SIZE};
 
+#[derive(Debug, Clone)]
+pub struct RenderConfig {
+    pub client_id: Option<u32>,
+    pub prediction_enabled: bool,
+    pub reconciliation_enabled: bool,
+    pub interpolation_enabled: bool,
+    pub ping_ms: u64,
+    pub fake_ping_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct UiConfig {
+    pub client_id: Option<u32>,
+    pub prediction_enabled: bool,
+    pub reconciliation_enabled: bool,
+    pub interpolation_enabled: bool,
+    pub ping_ms: u64,
+    pub fake_ping_ms: u64,
+    pub player_count: usize,
+}
+
 pub struct Renderer {
     width: f32,
     height: f32,
@@ -14,22 +35,13 @@ impl Renderer {
         })
     }
 
-    pub fn render(
-        &mut self,
-        players: &[Player],
-        client_id: Option<u32>,
-        prediction_enabled: bool,
-        reconciliation_enabled: bool,
-        interpolation_enabled: bool,
-        ping_ms: u64,
-        fake_ping_ms: u64,
-    ) {
+    pub fn render(&mut self, players: &[Player], config: RenderConfig) {
         clear_background(Color::from_rgba(26, 26, 26, 255));
 
         self.draw_floor();
 
         for player in players {
-            let is_local_player = Some(player.id) == client_id;
+            let is_local_player = Some(player.id) == config.client_id;
             let color = if is_local_player {
                 GREEN
             } else {
@@ -45,15 +57,16 @@ impl Renderer {
             self.draw_player_id(player);
         }
 
-        self.draw_ui(
-            client_id,
-            prediction_enabled,
-            reconciliation_enabled,
-            interpolation_enabled,
-            ping_ms,
-            fake_ping_ms,
-            players.len(),
-        );
+        let ui_config = UiConfig {
+            client_id: config.client_id,
+            prediction_enabled: config.prediction_enabled,
+            reconciliation_enabled: config.reconciliation_enabled,
+            interpolation_enabled: config.interpolation_enabled,
+            ping_ms: config.ping_ms,
+            fake_ping_ms: config.fake_ping_ms,
+            player_count: players.len(),
+        };
+        self.draw_ui(ui_config);
     }
 
     fn draw_floor(&mut self) {
@@ -133,24 +146,15 @@ impl Renderer {
         draw_rectangle(id_x, id_y, 4.0, 4.0, id_color);
     }
 
-    fn draw_ui(
-        &mut self,
-        client_id: Option<u32>,
-        prediction_enabled: bool,
-        reconciliation_enabled: bool,
-        interpolation_enabled: bool,
-        ping_ms: u64,
-        fake_ping_ms: u64,
-        player_count: usize,
-    ) {
+    fn draw_ui(&mut self, config: UiConfig) {
         let y_start = 10.0;
         let indicator_size = 12.0;
         let spacing = 25.0;
 
         let features = [
-            ("P", prediction_enabled),
-            ("R", reconciliation_enabled),
-            ("I", interpolation_enabled),
+            ("P", config.prediction_enabled),
+            ("R", config.reconciliation_enabled),
+            ("I", config.interpolation_enabled),
         ];
 
         for (i, (label, enabled)) in features.iter().enumerate() {
@@ -163,12 +167,16 @@ impl Renderer {
             draw_text(label, x + 3.0, y_start + indicator_size + 12.0, 12.0, WHITE);
         }
 
-        let connection_color = if client_id.is_some() { GREEN } else { RED };
+        let connection_color = if config.client_id.is_some() {
+            GREEN
+        } else {
+            RED
+        };
         draw_rectangle(10.0, y_start + 35.0, 8.0, 8.0, connection_color);
         draw_text("CON", 20.0, y_start + 35.0 + 8.0, 12.0, WHITE);
 
         let ping_y = y_start + 50.0;
-        let total_ping = ping_ms + fake_ping_ms;
+        let total_ping = config.ping_ms + config.fake_ping_ms;
         let ping_bars = ((total_ping / 20).min(10)) as i32;
 
         for i in 0..10i32 {
@@ -191,7 +199,7 @@ impl Renderer {
         draw_text(&ping_text, 45.0, ping_y + 8.0, 12.0, WHITE);
 
         let player_y = ping_y + 15.0;
-        for i in 0..(player_count.min(8)) {
+        for i in 0..(config.player_count.min(8)) {
             draw_rectangle(
                 10.0 + (i as f32) * 4.0,
                 player_y,
@@ -200,7 +208,7 @@ impl Renderer {
                 Color::from_rgba(0, 170, 255, 255),
             );
         }
-        let player_text = format!("{} players", player_count);
+        let player_text = format!("{} players", config.player_count);
         draw_text(&player_text, 45.0, player_y + 3.0, 12.0, WHITE);
     }
 }

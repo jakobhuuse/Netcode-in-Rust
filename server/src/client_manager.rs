@@ -92,7 +92,7 @@ impl ClientManager {
 
     pub fn get_chronological_inputs(&self) -> Vec<(u32, InputState)> {
         let mut all_inputs: Vec<(u32, InputState)> = Vec::new();
-        
+
         for (client_id, client) in &self.clients {
             for input in &client.pending_inputs {
                 if input.sequence > client.last_processed_input {
@@ -113,7 +113,9 @@ impl ClientManager {
 
     pub fn cleanup_processed_inputs(&mut self) {
         for client in self.clients.values_mut() {
-            client.pending_inputs.retain(|input| input.sequence > client.last_processed_input);
+            client
+                .pending_inputs
+                .retain(|input| input.sequence > client.last_processed_input);
         }
     }
 

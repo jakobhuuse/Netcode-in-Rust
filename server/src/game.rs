@@ -1,7 +1,7 @@
 use log::info;
 use shared::{
     resolve_collision, InputState, Player, FLOOR_Y, GRAVITY, JUMP_VELOCITY, PLAYER_SIZE,
-    PLAYER_SPEED, WORLD_HEIGHT, WORLD_WIDTH,
+    PLAYER_SPEED, WORLD_WIDTH,
 };
 use std::collections::HashMap;
 
@@ -34,7 +34,7 @@ impl GameState {
         info!("Removed player {}", client_id);
     }
 
-    pub fn apply_input(&mut self, client_id: u32, input: &InputState, dt: f32) {
+    pub fn apply_input(&mut self, client_id: u32, input: &InputState, _dt: f32) {
         if let Some(player) = self.players.get_mut(&client_id) {
             player.vel_x = 0.0;
             if input.left {
@@ -60,7 +60,7 @@ impl GameState {
             player.x += player.vel_x * dt;
             player.y += player.vel_y * dt;
 
-            player.x = player.x.max(0.0).min(WORLD_WIDTH - PLAYER_SIZE);
+            player.x = player.x.clamp(0.0, WORLD_WIDTH - PLAYER_SIZE);
 
             if player.y + PLAYER_SIZE >= FLOOR_Y {
                 player.y = FLOOR_Y - PLAYER_SIZE;

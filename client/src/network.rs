@@ -1,6 +1,6 @@
-use crate::game::ClientGameState;
+use crate::game::{ClientGameState, ServerStateConfig};
 use crate::input::InputManager;
-use crate::rendering::Renderer;
+use crate::rendering::{RenderConfig, Renderer};
 use bincode::{deserialize, serialize};
 use log::{error, info, warn};
 use macroquad::prelude::*;
@@ -104,14 +104,18 @@ impl Client {
                     self.ping_ms = now.saturating_sub(timestamp);
                 }
 
+                let config = ServerStateConfig {
+                    client_id: self.client_id,
+                    reconciliation_enabled: self.reconciliation_enabled,
+                    interpolation_enabled: self.interpolation_enabled,
+                };
+
                 self.game_state.apply_server_state(
                     tick,
                     timestamp,
                     players,
                     last_processed_input,
-                    self.client_id,
-                    self.reconciliation_enabled,
-                    self.interpolation_enabled,
+                    config,
                 );
             }
 
@@ -223,15 +227,16 @@ impl Client {
                     self.interpolation_enabled,
                 );
 
-                self.renderer.render(
-                    &players,
-                    self.client_id,
-                    self.prediction_enabled,
-                    self.reconciliation_enabled,
-                    self.interpolation_enabled,
-                    self.ping_ms,
-                    self.fake_ping_ms,
-                );
+                let render_config = RenderConfig {
+                    client_id: self.client_id,
+                    prediction_enabled: self.prediction_enabled,
+                    reconciliation_enabled: self.reconciliation_enabled,
+                    interpolation_enabled: self.interpolation_enabled,
+                    ping_ms: self.ping_ms,
+                    fake_ping_ms: self.fake_ping_ms,
+                };
+
+                self.renderer.render(&players, render_config);
 
                 last_render_time = Instant::now();
                 next_frame().await;
