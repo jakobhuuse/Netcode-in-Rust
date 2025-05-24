@@ -1,7 +1,4 @@
-# Makefile for Netcode Rust Project
-# Usage: make test, make bench, etc.
-
-.PHONY: all test clean lint format check bench install help
+.PHONY: all test clean lint format check bench install help run-server run-client
 
 # Default target
 all: check test
@@ -78,13 +75,13 @@ build-release: ## Build all packages in release mode
 	@cargo build --workspace --release
 
 # Run commands
-run-server: ## Run the server
+run-server: ## Run the server (use ARGS="--flag" for custom flags)
 	@echo "$(GREEN)🖥️  Starting server...$(NC)"
-	@cd server && cargo run
+	@cargo run -p server -- $(ARGS)
 
-run-client: ## Run the client
+run-client: ## Run the client (use ARGS="--flag" for custom flags)
 	@echo "$(GREEN)💻 Starting client...$(NC)"
-	@cd client && cargo run
+	@cargo run -p client -- $(ARGS)
 
 # Utility commands
 clean: ## Clean build artifacts
