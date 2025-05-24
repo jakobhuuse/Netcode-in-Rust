@@ -10,6 +10,7 @@ pub struct InputManager {
     prev_key_1: bool,
     prev_key_2: bool,
     prev_key_3: bool,
+    prev_key_r: bool,
 }
 
 impl InputManager {
@@ -27,10 +28,11 @@ impl InputManager {
             prev_key_1: false,
             prev_key_2: false,
             prev_key_3: false,
+            prev_key_r: false,
         }
     }
 
-    pub fn update(&mut self) -> ((bool, bool, bool), Option<InputState>) {
+    pub fn update(&mut self) -> ((bool, bool, bool, bool), Option<InputState>) {
         let left = is_key_down(KeyCode::A) || is_key_down(KeyCode::Left);
         let right = is_key_down(KeyCode::D) || is_key_down(KeyCode::Right);
         let jump = is_key_down(KeyCode::Space);
@@ -38,8 +40,9 @@ impl InputManager {
         let key_1 = is_key_down(KeyCode::Key1);
         let key_2 = is_key_down(KeyCode::Key2);
         let key_3 = is_key_down(KeyCode::Key3);
+        let key_r = is_key_down(KeyCode::R);
 
-        let mut toggles = (false, false, false);
+        let mut toggles = (false, false, false, false);
 
         if key_1 && !self.prev_key_1 {
             toggles.0 = true;
@@ -50,10 +53,14 @@ impl InputManager {
         if key_3 && !self.prev_key_3 {
             toggles.2 = true;
         }
+        if key_r && !self.prev_key_r {
+            toggles.3 = true;
+        }
 
         self.prev_key_1 = key_1;
         self.prev_key_2 = key_2;
         self.prev_key_3 = key_3;
+        self.prev_key_r = key_r;
 
         let input_changed = left != self.current_input.left
             || right != self.current_input.right

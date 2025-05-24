@@ -15,12 +15,6 @@ struct Args {
 
     #[arg(short = 'l', long, default_value = "0")]
     fake_ping: u64,
-
-    #[arg(short = 'w', long, default_value = "800")]
-    width: usize,
-
-    #[arg(long, default_value = "600")]
-    height: usize,
 }
 
 fn window_conf() -> Conf {
@@ -28,6 +22,7 @@ fn window_conf() -> Conf {
         window_title: "Netcode in Rust - Client".to_owned(),
         window_width: 800,
         window_height: 600,
+        window_resizable: true,
         ..Default::default()
     }
 }
@@ -49,9 +44,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     info!("Controls: A/D to move, Space to jump");
     info!("Press 1/2/3 to toggle Prediction/Reconciliation/Interpolation");
+    info!("Press R to reconnect to server");
 
-    let mut client =
-        network::Client::new(&args.server, args.fake_ping, args.width, args.height).await?;
+    let mut client = network::Client::new(&args.server, args.fake_ping).await?;
 
     client.run().await?;
 

@@ -22,17 +22,11 @@ pub struct UiConfig {
     pub player_count: usize,
 }
 
-pub struct Renderer {
-    width: f32,
-    height: f32,
-}
+pub struct Renderer {}
 
 impl Renderer {
-    pub fn new(width: usize, height: usize) -> Result<Self, Box<dyn std::error::Error>> {
-        Ok(Renderer {
-            width: width as f32,
-            height: height as f32,
-        })
+    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(Renderer {})
     }
 
     pub fn render(&mut self, players: &[Player], config: RenderConfig) {
@@ -71,11 +65,13 @@ impl Renderer {
 
     fn draw_floor(&mut self) {
         let floor_y = FLOOR_Y;
+        let current_width = screen_width();
+        let current_height = screen_height();
         draw_rectangle(
             0.0,
             floor_y,
-            self.width,
-            self.height - floor_y,
+            current_width,
+            current_height - floor_y,
             Color::from_rgba(68, 68, 68, 255),
         );
     }
@@ -173,10 +169,27 @@ impl Renderer {
             RED
         };
         draw_rectangle(10.0, y_start + 35.0, 8.0, 8.0, connection_color);
-        draw_text("CON", 20.0, y_start + 35.0 + 8.0, 12.0, WHITE);
+        let connection_text = if config.client_id.is_some() {
+            "CON"
+        } else {
+            "DIS"
+        };
+        draw_text(connection_text, 20.0, y_start + 35.0 + 8.0, 12.0, WHITE);
 
-        let ping_y = y_start + 50.0;
-        let total_ping = config.ping_ms + config.fake_ping_ms;
+        if config.client_id.is_none() {
+            draw_text("Press R to reconnect", 10.0, y_start + 55.0, 12.0, YELLOW);
+        }
+
+        let ping_y = if config.client_id.is_none() {
+            y_start + 70.0
+        } else {
+            y_start + 50.0
+        };
+        let total_ping = if config.fake_ping_ms > 0 {
+            config.fake_ping_ms
+        } else {
+            config.ping_ms
+        };
         let ping_bars = ((total_ping / 20).min(10)) as i32;
 
         for i in 0..10i32 {
