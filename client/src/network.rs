@@ -28,6 +28,7 @@ pub struct Client {
     real_ping_ms: u64,
     fake_ping_ms: u64,
     ping_ms: u64,
+    ping_history: VecDeque<u64>, // For smoothing ping calculations
     last_packet_received: Instant,
     connection_timeout: Duration,
 
@@ -64,6 +65,7 @@ impl Client {
             real_ping_ms: 0,
             fake_ping_ms,
             ping_ms: 0,
+            ping_history: VecDeque::new(),
             last_packet_received: Instant::now(),
             connection_timeout: Duration::from_secs(5),
             outgoing_packets: VecDeque::new(),
@@ -111,6 +113,9 @@ impl Client {
         // Reset client state
         self.connected = false;
         self.client_id = None;
+        self.real_ping_ms = 0;
+        self.ping_ms = self.fake_ping_ms;
+        self.ping_history.clear();
         self.last_packet_received = Instant::now();
         self.outgoing_packets.clear();
         self.incoming_packets.clear();
@@ -171,7 +176,7 @@ impl Client {
     }
 
     /// Handles incoming packets from the server
-    fn handle_packet_sync(&mut self, packet: Packet, receive_time: Instant) {
+    fn handle_packet_sync(&mut self, packet: Packet, _receive_time: Instant) {
         self.last_packet_received = Instant::now();
 
         match packet {
@@ -189,14 +194,37 @@ impl Client {
             } => {
                 // Calculate ping time for display
                 if timestamp > 0 {
-                    let elapsed_since_receive = receive_time.elapsed();
                     let now_ms = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or(Duration::from_secs(0))
                         .as_millis() as u64;
                     
-                    let actual_receive_time_ms = now_ms.saturating_sub(elapsed_since_receive.as_millis() as u64);
-                    self.real_ping_ms = actual_receive_time_ms.saturating_sub(timestamp);
+                    // More robust ping calculation that handles clock skew and prevents overflow
+                    let ping_candidate = if now_ms >= timestamp {
+                        now_ms - timestamp
+                    } else {
+                        // Server timestamp is in the future (clock skew), use previous ping or 0
+                        self.real_ping_ms.min(1000) // Cap at 1 second to prevent wild values
+                    };
+                    
+                    // Sanity check: ping should be reasonable (0-2000ms)
+                    if ping_candidate <= 2000 {
+                        // Add to history for smoothing
+                        self.ping_history.push_back(ping_candidate);
+                        
+                        // Keep only last 10 ping samples
+                        while self.ping_history.len() > 10 {
+                            self.ping_history.pop_front();
+                        }
+                        
+                        // Use moving average of last few pings for smoother display
+                        if !self.ping_history.is_empty() {
+                            let sum: u64 = self.ping_history.iter().sum();
+                            self.real_ping_ms = sum / self.ping_history.len() as u64;
+                        }
+                    }
+                    // If ping is unreasonable, keep the previous value
+                    
                     self.ping_ms = self.real_ping_ms + self.fake_ping_ms;
                 }
 

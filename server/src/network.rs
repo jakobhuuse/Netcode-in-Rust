@@ -356,16 +356,18 @@ impl Server {
             return;
         }
 
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::from_secs(0))
-            .as_millis() as u64;
-
+        // Prepare packet data first
         let players: Vec<Player> = self.game_state.players.values().cloned().collect();
         let last_processed_input = {
             let clients = self.clients.read().await;
             clients.get_last_processed_inputs()
         };
+
+        // Take timestamp as close to transmission as possible
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(0))
+            .as_millis() as u64;
 
         let packet = Packet::GameState {
             tick: self.game_state.tick,
