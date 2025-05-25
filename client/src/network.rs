@@ -360,6 +360,7 @@ impl Client {
                     real_ping_ms: self.real_ping_ms,
                     fake_ping_ms: self.fake_ping_ms,
                     ping_ms: self.ping_ms,
+                    current_input: Some(self.input_manager.get_current_input().clone()),
                 };
 
                 self.renderer.render(&players, render_config);

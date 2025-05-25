@@ -99,6 +99,11 @@ impl InputManager {
         (toggles, input_to_send)
     }
 
+    /// Returns the current input state
+    pub fn get_current_input(&self) -> &InputState {
+        &self.current_input
+    }
+
     fn get_timestamp() -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)

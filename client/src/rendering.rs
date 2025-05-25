@@ -13,6 +13,7 @@ pub struct RenderConfig {
     pub real_ping_ms: u64,
     pub fake_ping_ms: u64,
     pub ping_ms: u64,
+    pub current_input: Option<shared::InputState>,
 }
 
 /// Extended configuration for UI rendering
@@ -54,7 +55,7 @@ impl Renderer {
 
             // Show velocity vector for local player only
             if is_local_player {
-                self.draw_velocity_vector(player);
+                self.draw_velocity_vector(player, &config);
             }
 
             self.draw_player_id(player);
@@ -92,16 +93,37 @@ impl Renderer {
     }
 
     /// Draws velocity vector for debugging player movement
-    fn draw_velocity_vector(&mut self, player: &Player) {
+    fn draw_velocity_vector(&mut self, player: &Player, config: &RenderConfig) {
         let center_x = player.x + PLAYER_SIZE / 2.0;
         let center_y = player.y + PLAYER_SIZE / 2.0;
 
         let vel_scale = 0.15;
-        let end_x = center_x + player.vel_x * vel_scale;
-        let end_y = center_y + player.vel_y * vel_scale;
+        
+        // When predictions are enabled, use the player's actual velocity
+        // When predictions are disabled, calculate velocity from current input to avoid stale server data
+        let (vel_x, vel_y) = if config.prediction_enabled {
+            (player.vel_x, player.vel_y)
+        } else if let Some(ref input) = config.current_input {
+            // Calculate expected velocity based on current input (matching server logic)
+            let mut expected_vel_x = 0.0;
+            if input.left {
+                expected_vel_x -= shared::PLAYER_SPEED;
+            }
+            if input.right {
+                expected_vel_x += shared::PLAYER_SPEED;
+            }
+            // For vertical velocity, use actual player velocity since jumping is more complex
+            (expected_vel_x, player.vel_y)
+        } else {
+            // No current input available, use player velocity as fallback
+            (player.vel_x, player.vel_y)
+        };
+
+        let end_x = center_x + vel_x * vel_scale;
+        let end_y = center_y + vel_y * vel_scale;
 
         // Only draw if moving significantly
-        if player.vel_x.abs() > 10.0 || player.vel_y.abs() > 10.0 {
+        if vel_x.abs() > 10.0 || vel_y.abs() > 10.0 {
             draw_line(center_x, center_y, end_x, end_y, 2.0, YELLOW);
             self.draw_arrow_head(center_x, center_y, end_x, end_y);
         }
