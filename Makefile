@@ -9,7 +9,7 @@ YELLOW := \033[0;33m
 BLUE := \033[0;34m
 NC := \033[0m # No Color
 
-help: ## Show this help message
+help: ## Show available commands
 	@echo "Available targets:"
 	@awk 'BEGIN {FS = ":.*?## "}; /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -61,7 +61,7 @@ bench: ## Run benchmark tests
 	@echo "$(YELLOW)⚡ Running benchmark tests...$(NC)"
 	@cargo test --test benchmark_tests -- --nocapture
 
-bench-release: ## Run benchmarks in release mode (more accurate)
+bench-release: ## Run benchmarks in release mode
 	@echo "$(YELLOW)⚡ Running release benchmarks...$(NC)"
 	@cargo test --release --test benchmark_tests -- --nocapture
 
@@ -70,7 +70,7 @@ build: ## Build all packages
 	@echo "$(BLUE)🔨 Building all packages...$(NC)"
 	@cargo build --workspace
 
-build-release: ## Build all packages in release mode
+build-release: ## Build in release mode
 	@echo "$(BLUE)🔨 Building release packages...$(NC)" 
 	@cargo build --workspace --release
 
@@ -91,4 +91,3 @@ clean: ## Clean build artifacts
 install: ## Install development dependencies
 	@echo "$(BLUE)📦 Installing development tools...$(NC)"
 	@rustup component add clippy rustfmt
-	@$(MAKE) coverage-install
