@@ -50,10 +50,12 @@ pub struct RenderConfig {
     pub reconciliation_enabled: bool,
     /// Whether interpolation smoothing is currently active
     pub interpolation_enabled: bool,
-    /// Measured network round-trip latency in milliseconds
-    pub ping_ms: u64,
+    /// Actual network round-trip latency in milliseconds
+    pub real_ping_ms: u64,
     /// Simulated artificial latency in milliseconds (0 = disabled)
     pub fake_ping_ms: u64,
+    /// Total displayed ping (real + fake) in milliseconds
+    pub ping_ms: u64,
 }
 
 /// Extended configuration for UI rendering with additional statistical data.
@@ -65,8 +67,9 @@ pub struct UiConfig {
     pub prediction_enabled: bool,
     pub reconciliation_enabled: bool,
     pub interpolation_enabled: bool,
-    pub ping_ms: u64,
+    pub real_ping_ms: u64,
     pub fake_ping_ms: u64,
+    pub ping_ms: u64,
     /// Number of players currently connected to the server
     pub player_count: usize,
 }
@@ -141,8 +144,9 @@ impl Renderer {
             prediction_enabled: config.prediction_enabled,
             reconciliation_enabled: config.reconciliation_enabled,
             interpolation_enabled: config.interpolation_enabled,
-            ping_ms: config.ping_ms,
+            real_ping_ms: config.real_ping_ms,
             fake_ping_ms: config.fake_ping_ms,
+            ping_ms: config.ping_ms,
             player_count: players.len(),
         };
         self.draw_ui(ui_config);
@@ -335,11 +339,10 @@ impl Renderer {
         } else {
             y_start + 50.0
         };
-        let total_ping = if config.fake_ping_ms > 0 {
-            config.fake_ping_ms // Use simulated ping if artificial latency is enabled
-        } else {
-            config.ping_ms // Use actual measured ping
-        };
+        
+        // Always show total ping in the bar graph
+        let total_ping = config.ping_ms;
+        
         // Convert ping to bar count (20ms per bar, max 10 bars = 200ms+)
         let ping_bars = ((total_ping / 20).min(10)) as i32;
 
@@ -360,8 +363,14 @@ impl Renderer {
             draw_rectangle(10.0 + (i as f32) * 3.0, ping_y, 2.0, 8.0, bar_color);
         }
 
-        let ping_text = format!("{}ms", total_ping);
-        draw_text(&ping_text, 45.0, ping_y + 8.0, 12.0, WHITE);
+        // Show detailed ping breakdown
+        if config.fake_ping_ms > 0 {
+            let ping_text = format!("{}ms ({}+{})", total_ping, config.real_ping_ms, config.fake_ping_ms);
+            draw_text(&ping_text, 45.0, ping_y + 8.0, 12.0, WHITE);
+        } else {
+            let ping_text = format!("{}ms", total_ping);
+            draw_text(&ping_text, 45.0, ping_y + 8.0, 12.0, WHITE);
+        }
 
         // Player count visualization using small squares
         let player_y = ping_y + 15.0;

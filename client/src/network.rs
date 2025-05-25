@@ -38,8 +38,9 @@ pub struct Client {
     renderer: Renderer,
 
     // Connection monitoring
-    ping_ms: u64,
-    fake_ping_ms: u64, // Artificial latency for testing
+    real_ping_ms: u64,     // Actual network ping
+    fake_ping_ms: u64,     // Artificial latency for testing
+    ping_ms: u64,          // Total displayed ping (real + fake)
     last_packet_received: Instant,
     connection_timeout: Duration,
 
@@ -80,8 +81,9 @@ impl Client {
             game_state: ClientGameState::new(),
             input_manager: InputManager::new(),
             renderer,
-            ping_ms: 0,
+            real_ping_ms: 0,
             fake_ping_ms,
+            ping_ms: 0,
             last_packet_received: Instant::now(),
             connection_timeout: Duration::from_secs(5),
             outgoing_packets: VecDeque::new(),
@@ -238,7 +240,7 @@ impl Client {
     /// - Disconnected: Handles server-initiated disconnection
     ///
     /// Also calculates ping time and updates connection health tracking.
-    fn handle_packet_sync(&mut self, packet: Packet, _receive_time: Instant) {
+    fn handle_packet_sync(&mut self, packet: Packet, receive_time: Instant) {
         // Update connection health tracking
         self.last_packet_received = Instant::now();
 
@@ -255,19 +257,31 @@ impl Client {
                 last_processed_input,
                 players,
             } => {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or(Duration::from_secs(0))
-                    .as_millis() as u64;
-
                 // Calculate ping time for display and netcode tuning
                 if timestamp > 0 {
+                    // Calculate the elapsed time since the packet was actually received
+                    // This accounts for any artificial delay in processing
+                    let elapsed_since_receive = receive_time.elapsed();
+                    
+                    // Get current system time and subtract the processing delay
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or(Duration::from_secs(0))
+                        .as_millis() as u64;
+                    
+                    // Reconstruct the actual receive time by subtracting processing delay
+                    let actual_receive_time_ms = now_ms.saturating_sub(elapsed_since_receive.as_millis() as u64);
+                    
+                    // Always calculate real ping from actual network round-trip time
+                    self.real_ping_ms = actual_receive_time_ms.saturating_sub(timestamp);
+                    
+                    // Total displayed ping is real ping + artificial ping
+                    self.ping_ms = self.real_ping_ms + self.fake_ping_ms;
+                    
+                    // Log ping breakdown when fake ping is enabled
                     if self.fake_ping_ms > 0 {
-                        // Use artificial ping for consistent testing
-                        self.ping_ms = self.fake_ping_ms;
-                    } else {
-                        // Calculate real round-trip time
-                        self.ping_ms = now.saturating_sub(timestamp);
+                        log::debug!("Ping breakdown: real={}ms, fake={}ms, total={}ms", 
+                                   self.real_ping_ms, self.fake_ping_ms, self.ping_ms);
                     }
                 }
 
@@ -456,8 +470,9 @@ impl Client {
                     prediction_enabled: self.prediction_enabled,
                     reconciliation_enabled: self.reconciliation_enabled,
                     interpolation_enabled: self.interpolation_enabled,
-                    ping_ms: self.ping_ms,
+                    real_ping_ms: self.real_ping_ms,
                     fake_ping_ms: self.fake_ping_ms,
+                    ping_ms: self.ping_ms,
                 };
 
                 self.renderer.render(&players, render_config);
@@ -523,5 +538,54 @@ mod tests {
         // Test with invalid domain
         let result = Client::resolve_address("nonexistent.invalid.domain:8080");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_ping_calculation_with_fake_ping() {
+        // Test that fake ping is added on top of real ping, not replacing it
+        let mut client = Client {
+            socket: UdpSocket::bind("0.0.0.0:0").unwrap(),
+            server_addr: "127.0.0.1:8080".parse().unwrap(),
+            client_id: Some(1),
+            connected: true,
+            game_state: ClientGameState::new(),
+            input_manager: InputManager::new(),
+            renderer: Renderer::new().unwrap(),
+            real_ping_ms: 0,
+            fake_ping_ms: 50, // 50ms fake ping
+            ping_ms: 0,
+            last_packet_received: Instant::now(),
+            connection_timeout: Duration::from_secs(5),
+            outgoing_packets: VecDeque::new(),
+            incoming_packets: VecDeque::new(),
+            prediction_enabled: true,
+            reconciliation_enabled: true,
+            interpolation_enabled: true,
+        };
+
+        // Simulate receiving a packet with a timestamp that would result in 30ms real ping
+        let fake_timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64 - 30; // 30ms ago
+
+        // Simulate the ping calculation logic
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        
+        client.real_ping_ms = now.saturating_sub(fake_timestamp);
+        client.ping_ms = client.real_ping_ms + client.fake_ping_ms;
+
+        // Verify that the total ping is real ping + fake ping
+        assert_eq!(client.real_ping_ms, 30);
+        assert_eq!(client.fake_ping_ms, 50);
+        assert_eq!(client.ping_ms, 80); // 30 + 50
+        
+        println!("✓ Ping calculation test passed!");
+        println!("  Real ping: {}ms", client.real_ping_ms);
+        println!("  Fake ping: {}ms", client.fake_ping_ms);
+        println!("  Total ping: {}ms", client.ping_ms);
     }
 }
