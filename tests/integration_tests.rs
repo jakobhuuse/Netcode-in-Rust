@@ -167,12 +167,16 @@ fn test_player_boundary_constraints() {
 
     // Test left boundary
     player.x = -10.0;
-    player.x = player.x.clamp(0.0, shared::WORLD_WIDTH - shared::PLAYER_SIZE);
+    player.x = player
+        .x
+        .clamp(0.0, shared::WORLD_WIDTH - shared::PLAYER_SIZE);
     assert_eq!(player.x, 0.0);
 
     // Test right boundary
     player.x = shared::WORLD_WIDTH + 10.0;
-    player.x = player.x.clamp(0.0, shared::WORLD_WIDTH - shared::PLAYER_SIZE);
+    player.x = player
+        .x
+        .clamp(0.0, shared::WORLD_WIDTH - shared::PLAYER_SIZE);
     assert_eq!(player.x, shared::WORLD_WIDTH - shared::PLAYER_SIZE);
 
     // Test floor collision

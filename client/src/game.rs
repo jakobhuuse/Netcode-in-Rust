@@ -149,7 +149,9 @@ impl ClientGameState {
         // Update confirmed state
         self.confirmed_state.players.clear();
         for player in &players {
-            self.confirmed_state.players.insert(player.id, player.clone());
+            self.confirmed_state
+                .players
+                .insert(player.id, player.clone());
         }
         self.confirmed_state.tick = tick;
 
@@ -179,7 +181,9 @@ impl ClientGameState {
         } else if let Some(client_id) = config.client_id {
             // Without reconciliation, just sync to confirmed state
             if let Some(confirmed_player) = self.confirmed_state.players.get(&client_id) {
-                self.predicted_state.players.insert(client_id, confirmed_player.clone());
+                self.predicted_state
+                    .players
+                    .insert(client_id, confirmed_player.clone());
             }
         }
 
@@ -217,7 +221,8 @@ impl ClientGameState {
 
                     // Replay: Re-apply unacknowledged inputs
                     for input in &self.input_history {
-                        self.predicted_state.apply_input(client_id, input, self.fixed_timestep);
+                        self.predicted_state
+                            .apply_input(client_id, input, self.fixed_timestep);
                         self.predicted_state.step(self.fixed_timestep);
                     }
                 }
@@ -236,7 +241,8 @@ impl ClientGameState {
         }
 
         // Apply input immediately to predicted state
-        self.predicted_state.apply_input(client_id, input, self.fixed_timestep);
+        self.predicted_state
+            .apply_input(client_id, input, self.fixed_timestep);
         self.predicted_state.step(self.fixed_timestep);
     }
 

@@ -16,7 +16,9 @@ pub const PLAYER_SIZE: f32 = 32.0; // pixels
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Packet {
     // Client → Server
-    Connect { client_version: u32 },
+    Connect {
+        client_version: u32,
+    },
     Input {
         sequence: u32,
         timestamp: u64,
@@ -27,14 +29,18 @@ pub enum Packet {
     Disconnect,
 
     // Server → Client
-    Connected { client_id: u32 },
+    Connected {
+        client_id: u32,
+    },
     GameState {
         tick: u32,
         timestamp: u64,
         last_processed_input: HashMap<u32, u32>,
         players: Vec<Player>,
     },
-    Disconnected { reason: String },
+    Disconnected {
+        reason: String,
+    },
 }
 
 /// Player entity with position, velocity, and state
@@ -134,8 +140,8 @@ pub fn resolve_collision(player1: &mut Player, player2: &mut Player) {
 /// Input state for deterministic networked gameplay
 #[derive(Debug, Clone)]
 pub struct InputState {
-    pub sequence: u32,    // For reliable ordering
-    pub timestamp: u64,   // For lag compensation
+    pub sequence: u32,  // For reliable ordering
+    pub timestamp: u64, // For lag compensation
     pub left: bool,
     pub right: bool,
     pub jump: bool,
@@ -145,7 +151,6 @@ pub struct InputState {
 mod tests {
     use super::*;
     use assert_approx_eq::assert_approx_eq;
-    use std::collections::HashMap;
 
     #[test]
     fn test_player_creation() {

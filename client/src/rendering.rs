@@ -98,7 +98,7 @@ impl Renderer {
         let center_y = player.y + PLAYER_SIZE / 2.0;
 
         let vel_scale = 0.15;
-        
+
         // When predictions are enabled, use the player's actual velocity
         // When predictions are disabled, calculate velocity from current input to avoid stale server data
         let (vel_x, vel_y) = if config.prediction_enabled {
@@ -221,7 +221,7 @@ impl Renderer {
         } else {
             y_start + 50.0
         };
-        
+
         let total_ping = config.ping_ms;
         let ping_bars = ((total_ping / 20).min(10)) as i32; // 20ms per bar, max 10 bars
 
@@ -243,7 +243,10 @@ impl Renderer {
 
         // Show ping breakdown
         if config.fake_ping_ms > 0 {
-            let ping_text = format!("{}ms ({}+{})", total_ping, config.real_ping_ms, config.fake_ping_ms);
+            let ping_text = format!(
+                "{}ms ({}+{})",
+                total_ping, config.real_ping_ms, config.fake_ping_ms
+            );
             draw_text(&ping_text, 45.0, ping_y + 8.0, 12.0, WHITE);
         } else {
             let ping_text = format!("{}ms", total_ping);

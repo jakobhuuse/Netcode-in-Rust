@@ -199,7 +199,7 @@ mod tests {
             jump: true,
         };
         game_state.apply_input(1, &input, 1.0 / 60.0);
-        
+
         let initial_vel_y = game_state.players.get(&1).unwrap().vel_y;
         let dt = 1.0 / 60.0;
         game_state.update_physics(dt);

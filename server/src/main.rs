@@ -42,7 +42,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tick_duration = Duration::from_secs_f32(1.0 / args.tick_rate as f32);
 
     info!("Starting game server on {}", addr);
-    info!("Tick rate: {} Hz ({:?} per tick)", args.tick_rate, tick_duration);
+    info!(
+        "Tick rate: {} Hz ({:?} per tick)",
+        args.tick_rate, tick_duration
+    );
     info!("Max clients: {}", args.max_clients);
 
     let mut server = network::Server::new(&addr, tick_duration, args.max_clients).await?;

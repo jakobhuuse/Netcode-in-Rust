@@ -64,7 +64,7 @@ impl Client {
             game_state: ClientGameState::new(),
             input_manager: InputManager::new(),
             renderer,
-            network_graph: NetworkGraph::new(),  // Initialize network graph
+            network_graph: NetworkGraph::new(), // Initialize network graph
             real_ping_ms: 0,
             fake_ping_ms,
             ping_ms: 0,
@@ -204,7 +204,7 @@ impl Client {
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or(Duration::from_secs(0))
                         .as_millis() as u64;
-                    
+
                     // More robust ping calculation that handles clock skew and prevents overflow
                     let ping_candidate = if now_ms >= timestamp {
                         now_ms - timestamp
@@ -212,17 +212,17 @@ impl Client {
                         // Server timestamp is in the future (clock skew), use previous ping or 0
                         self.real_ping_ms.min(1000) // Cap at 1 second to prevent wild values
                     };
-                    
+
                     // Sanity check: ping should be reasonable (0-2000ms)
                     if ping_candidate <= 2000 {
                         // Add to history for smoothing
                         self.ping_history.push_back(ping_candidate);
-                        
+
                         // Keep only last 10 ping samples
                         while self.ping_history.len() > 10 {
                             self.ping_history.pop_front();
                         }
-                        
+
                         // Use moving average of last few pings for smoother display
                         if !self.ping_history.is_empty() {
                             let sum: u64 = self.ping_history.iter().sum();
@@ -230,11 +230,12 @@ impl Client {
                         }
                     }
                     // If ping is unreasonable, keep the previous value
-                    
+
                     self.ping_ms = self.real_ping_ms + self.fake_ping_ms;
-                    
+
                     // Record packet received for network graph
-                    self.network_graph.record_packet_received(self.ping_ms as f32);
+                    self.network_graph
+                        .record_packet_received(self.ping_ms as f32);
                 }
 
                 let config = ServerStateConfig {
@@ -312,7 +313,14 @@ impl Client {
         }
         if toggles.4 {
             self.network_graph.toggle_visibility();
-            info!("Network graph: {}", if self.network_graph.is_visible() { "shown" } else { "hidden" });
+            info!(
+                "Network graph: {}",
+                if self.network_graph.is_visible() {
+                    "shown"
+                } else {
+                    "hidden"
+                }
+            );
         }
 
         reconnect_requested
@@ -405,7 +413,7 @@ impl Client {
                 };
 
                 self.renderer.render(&players, render_config);
-                
+
                 // Render network graph on top of everything else
                 self.network_graph.render();
 

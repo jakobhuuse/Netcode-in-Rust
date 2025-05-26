@@ -15,8 +15,13 @@ use tokio::time::interval;
 /// Messages sent from network tasks to main server loop
 #[derive(Debug)]
 pub enum ServerMessage {
-    PacketReceived { packet: Packet, addr: SocketAddr },
-    ClientTimeout { client_id: u32 },
+    PacketReceived {
+        packet: Packet,
+        addr: SocketAddr,
+    },
+    ClientTimeout {
+        client_id: u32,
+    },
     #[allow(dead_code)]
     Shutdown,
 }
@@ -24,8 +29,14 @@ pub enum ServerMessage {
 /// Messages sent from game loop to network tasks
 #[derive(Debug)]
 pub enum GameMessage {
-    SendPacket { packet: Packet, addr: SocketAddr },
-    BroadcastPacket { packet: Packet, exclude: Option<u32> },
+    SendPacket {
+        packet: Packet,
+        addr: SocketAddr,
+    },
+    BroadcastPacket {
+        packet: Packet,
+        exclude: Option<u32>,
+    },
 }
 
 /// Main server coordinating networking and game simulation
@@ -190,7 +201,10 @@ impl Server {
     async fn handle_packet(&mut self, packet: Packet, addr: SocketAddr) {
         match packet {
             Packet::Connect { client_version } => {
-                info!("Client connecting from {} (version: {})", addr, client_version);
+                info!(
+                    "Client connecting from {} (version: {})",
+                    addr, client_version
+                );
 
                 // Remove existing connection if present
                 let existing_client_id = {
