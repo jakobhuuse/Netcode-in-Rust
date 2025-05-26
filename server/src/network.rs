@@ -381,11 +381,12 @@ impl Server {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::from_secs(0))
-            .as_millis() as u64;
+            .as_millis();
+        let timestamp_safe = (timestamp.min(u64::MAX as u128)) as u64;
 
         let packet = Packet::GameState {
             tick: self.game_state.tick,
-            timestamp,
+            timestamp: timestamp_safe,
             last_processed_input,
             players,
         };

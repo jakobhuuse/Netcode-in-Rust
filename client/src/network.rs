@@ -34,6 +34,11 @@ pub struct Client {
     last_packet_received: Instant,
     connection_timeout: Duration,
 
+    // Clock synchronization for remote servers
+    clock_offset_samples: VecDeque<i64>, // Track clock offset between client and server
+    last_server_timestamp: Option<u64>,
+    packet_send_times: VecDeque<(u64, Instant)>, // Track when we sent packets for RTT calculation
+
     // Packet queuing for artificial latency simulation
     outgoing_packets: VecDeque<(Vec<u8>, Instant)>,
     incoming_packets: VecDeque<(Packet, Instant, Instant)>,
@@ -71,6 +76,9 @@ impl Client {
             ping_history: VecDeque::new(),
             last_packet_received: Instant::now(),
             connection_timeout: Duration::from_secs(5),
+            clock_offset_samples: VecDeque::new(),
+            last_server_timestamp: None,
+            packet_send_times: VecDeque::new(),
             outgoing_packets: VecDeque::new(),
             incoming_packets: VecDeque::new(),
             prediction_enabled: true,
@@ -200,18 +208,7 @@ impl Client {
             } => {
                 // Calculate ping time for display
                 if timestamp > 0 {
-                    let now_ms = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or(Duration::from_secs(0))
-                        .as_millis() as u64;
-
-                    // More robust ping calculation that handles clock skew and prevents overflow
-                    let ping_candidate = if now_ms >= timestamp {
-                        now_ms - timestamp
-                    } else {
-                        // Server timestamp is in the future (clock skew), use previous ping or 0
-                        self.real_ping_ms.min(1000) // Cap at 1 second to prevent wild values
-                    };
+                    let ping_candidate = self.calculate_robust_ping(timestamp);
 
                     // Sanity check: ping should be reasonable (0-2000ms)
                     if ping_candidate <= 2000 {
@@ -432,6 +429,95 @@ impl Client {
         }
 
         Ok(())
+    }
+
+    /// Calculates ping using clock-drift resistant method for remote servers
+    fn calculate_robust_ping(&mut self, server_timestamp: u64) -> u64 {
+        // Track the relationship between server and client timestamps to detect clock drift
+        self.last_server_timestamp = Some(server_timestamp);
+
+        // Get current time safely
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(0))
+            .as_millis();
+
+        // Safe conversion with overflow protection
+        let now_ms_safe = (now_ms.min(u64::MAX as u128)) as u64;
+
+        // Use timestamp deltas for drift-resistant calculation when we have history
+        if let Some((prev_server_ts, prev_recv_time)) = self.packet_send_times.back() {
+            let prev_server_ts = *prev_server_ts;
+            let prev_recv_time = *prev_recv_time;
+
+            // Calculate time differences on both sides
+            let server_time_diff = server_timestamp.saturating_sub(prev_server_ts);
+            let client_time_diff = prev_recv_time.elapsed().as_millis() as u64;
+
+            // If the differences are reasonable, use them to estimate ping
+            if server_time_diff > 0 && server_time_diff < 5000 && client_time_diff < 5000 {
+                // Estimate RTT based on time progression
+                let estimated_ping = if client_time_diff > server_time_diff {
+                    (client_time_diff - server_time_diff) / 2
+                } else {
+                    // Server clock is faster, use a conservative estimate
+                    server_time_diff.min(self.real_ping_ms.max(50))
+                };
+
+                // Store this measurement for next calculation
+                self.packet_send_times
+                    .push_back((server_timestamp, Instant::now()));
+                if self.packet_send_times.len() > 20 {
+                    self.packet_send_times.pop_front();
+                }
+
+                return estimated_ping.clamp(10, 2000);
+            }
+        }
+
+        // Fallback: Calculate clock offset to detect systematic drift
+        let raw_ping = if now_ms_safe >= server_timestamp {
+            now_ms_safe.saturating_sub(server_timestamp)
+        } else {
+            // Server is ahead - this suggests clock skew
+            let clock_offset = server_timestamp.saturating_sub(now_ms_safe);
+
+            // Track clock offset samples for drift detection
+            self.clock_offset_samples.push_back(clock_offset as i64);
+            if self.clock_offset_samples.len() > 10 {
+                self.clock_offset_samples.pop_front();
+            }
+
+            // Use median offset to handle clock corrections
+            if self.clock_offset_samples.len() >= 3 {
+                let mut offsets: Vec<i64> = self.clock_offset_samples.iter().cloned().collect();
+                offsets.sort();
+                let median_offset = offsets[offsets.len() / 2];
+
+                // Apply offset correction if it's consistent
+                if median_offset.abs() < 10000 {
+                    // Less than 10 seconds offset
+                    let corrected_server_time =
+                        server_timestamp.saturating_sub(median_offset.unsigned_abs());
+                    now_ms_safe.saturating_sub(corrected_server_time)
+                } else {
+                    // Large offset, use previous ping
+                    self.real_ping_ms.min(1000)
+                }
+            } else {
+                // Not enough samples, use previous ping
+                self.real_ping_ms.min(1000)
+            }
+        };
+
+        // Store this measurement for next calculation
+        self.packet_send_times
+            .push_back((server_timestamp, Instant::now()));
+        if self.packet_send_times.len() > 20 {
+            self.packet_send_times.pop_front();
+        }
+
+        raw_ping.clamp(0, 2000)
     }
 }
 

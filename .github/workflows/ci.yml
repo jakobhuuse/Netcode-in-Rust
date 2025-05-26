@@ -105,7 +105,7 @@ jobs:
                           -p 8080:8080/udp \
                           -e RUST_LOG=info \
                           ${{ needs.build-and-push.outputs.image }} \
-                          server --host 0.0.0.0 --port 8080 --tick-rate 60 --max-clients 50
+                          server --host 0.0.0.0 --port 8080 --tick-rate 20 --max-clients 50
 
                       # Clean up old images
                       docker image prune -f
