@@ -452,8 +452,14 @@ mod tests {
             jump: false,
         };
 
-        state1.predicted_state.players.insert(1, Player::new(1, 100.0, 100.0));
-        state2.predicted_state.players.insert(1, Player::new(1, 100.0, 100.0));
+        state1
+            .predicted_state
+            .players
+            .insert(1, Player::new(1, 100.0, 100.0));
+        state2
+            .predicted_state
+            .players
+            .insert(1, Player::new(1, 100.0, 100.0));
 
         state1.predicted_state.apply_input(1, &input, 1.0 / 60.0);
         state2.predicted_state.apply_input(1, &input, 1.0 / 60.0);
@@ -463,7 +469,7 @@ mod tests {
 
         let player1 = &state1.predicted_state.players[&1];
         let player2 = &state2.predicted_state.players[&1];
-        
+
         assert!((player1.x - player2.x).abs() < 0.001);
         assert!((player1.y - player2.y).abs() < 0.001);
         assert!((player1.vel_x - player2.vel_x).abs() < 0.001);
@@ -473,9 +479,12 @@ mod tests {
     #[test]
     fn test_apply_prediction() {
         let mut client_state = ClientGameState::new();
-        
+
         // Add player and input
-        client_state.predicted_state.players.insert(1, Player::new(1, 100.0, 100.0));
+        client_state
+            .predicted_state
+            .players
+            .insert(1, Player::new(1, 100.0, 100.0));
         let input = InputState {
             sequence: 1,
             timestamp: 1000,
@@ -494,7 +503,7 @@ mod tests {
     #[test]
     fn test_apply_server_state_reconciliation_disabled() {
         let mut client_state = ClientGameState::new();
-        
+
         let players = vec![Player::new(1, 150.0, 200.0)];
         let config = ServerStateConfig {
             client_id: Some(1),
@@ -512,7 +521,7 @@ mod tests {
     #[test]
     fn test_physics_update_client_side() {
         let mut client_state = ClientGameState::new();
-        
+
         // Add player with velocity (in the air, not on ground)
         let mut player = Player::new(1, 100.0, 100.0);
         player.vel_x = 120.0;
@@ -523,7 +532,7 @@ mod tests {
         // Use the game state directly to test physics
         let initial_x = client_state.predicted_state.players[&1].x;
         let initial_vel_y = client_state.predicted_state.players[&1].vel_y;
-        
+
         let dt = 1.0 / 60.0;
         client_state.predicted_state.update_physics(dt);
 
@@ -535,12 +544,15 @@ mod tests {
     #[test]
     fn test_reconciliation_rollback_threshold() {
         let mut client_state = ClientGameState::new();
-        
+
         // Add player with different position than server state
         let mut predicted_player = Player::new(1, 200.0, 100.0);
         predicted_player.vel_x = 100.0;
-        client_state.predicted_state.players.insert(1, predicted_player);
-        
+        client_state
+            .predicted_state
+            .players
+            .insert(1, predicted_player);
+
         // Add some inputs to history
         for i in 1..=3 {
             let input = InputState {
@@ -552,13 +564,13 @@ mod tests {
             };
             client_state.input_history.push(input);
         }
-        
+
         // Server state with significantly different position
         let confirmed_player = Player::new(1, 50.0, 100.0); // 150 units away
         let players = vec![confirmed_player];
         let mut last_processed = HashMap::new();
         last_processed.insert(1u32, 2u32); // Server processed up to sequence 2
-        
+
         let config = ServerStateConfig {
             client_id: Some(1),
             reconciliation_enabled: true,
@@ -577,7 +589,7 @@ mod tests {
     #[test]
     fn test_apply_server_state_with_interpolation() {
         let mut client_state = ClientGameState::new();
-        
+
         let players = vec![Player::new(1, 100.0, 100.0)];
         let config = ServerStateConfig {
             client_id: Some(1),
@@ -595,8 +607,11 @@ mod tests {
     #[test]
     fn test_get_render_players_no_prediction() {
         let mut client_state = ClientGameState::new();
-        client_state.confirmed_state.players.insert(1, Player::new(1, 100.0, 100.0));
-        
+        client_state
+            .confirmed_state
+            .players
+            .insert(1, Player::new(1, 100.0, 100.0));
+
         let players = client_state.get_render_players(Some(1), false, false);
         assert_eq!(players.len(), 1);
         assert_eq!(players[0].x, 100.0);
@@ -605,9 +620,15 @@ mod tests {
     #[test]
     fn test_get_render_players_with_prediction() {
         let mut client_state = ClientGameState::new();
-        client_state.confirmed_state.players.insert(1, Player::new(1, 100.0, 100.0));
-        client_state.predicted_state.players.insert(1, Player::new(1, 150.0, 100.0));
-        
+        client_state
+            .confirmed_state
+            .players
+            .insert(1, Player::new(1, 100.0, 100.0));
+        client_state
+            .predicted_state
+            .players
+            .insert(1, Player::new(1, 150.0, 100.0));
+
         let players = client_state.get_render_players(Some(1), true, false);
         assert_eq!(players.len(), 1);
         assert_eq!(players[0].x, 150.0); // Should use predicted state
@@ -616,7 +637,7 @@ mod tests {
     #[test]
     fn test_update_physics_accumulator() {
         let mut client_state = ClientGameState::new();
-        
+
         // Add player
         let mut player = Player::new(1, 100.0, 100.0);
         player.vel_x = 120.0;
@@ -634,7 +655,7 @@ mod tests {
     #[test]
     fn test_interpolation_buffer_management() {
         let mut client_state = ClientGameState::new();
-        
+
         // Add multiple states to interpolation buffer
         for i in 0..5 {
             let players = vec![Player::new(1, i as f32 * 10.0, 100.0)];
@@ -643,7 +664,7 @@ mod tests {
                 reconciliation_enabled: false,
                 interpolation_enabled: true,
             };
-            
+
             // Use timestamps within the retention window (1000ms)
             let base_time = 15000u64; // Recent timestamp
             let timestamp = base_time + (i as u64) * 100; // 100ms apart
@@ -657,7 +678,7 @@ mod tests {
     #[test]
     fn test_input_history_overflow_protection() {
         let mut client_state = ClientGameState::new();
-        
+
         // Add many inputs through apply_prediction to trigger overflow protection
         for i in 0..150 {
             let input = InputState {

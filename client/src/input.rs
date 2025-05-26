@@ -166,9 +166,12 @@ mod tests {
             .collect();
 
         for i in 1..timestamps.len() {
-            assert!(timestamps[i] >= timestamps[i - 1], 
-                "Timestamp should be monotonic: {} >= {}", 
-                timestamps[i], timestamps[i - 1]);
+            assert!(
+                timestamps[i] >= timestamps[i - 1],
+                "Timestamp should be monotonic: {} >= {}",
+                timestamps[i],
+                timestamps[i - 1]
+            );
         }
     }
 
@@ -182,11 +185,11 @@ mod tests {
     #[test]
     fn test_sequence_increment() {
         let mut input_manager = InputManager::new();
-        
+
         // Since we can't mock macroquad key states, we'll test the sequence logic
         // by verifying the sequence starts at 1 and would increment
         assert_eq!(input_manager.next_sequence, 1);
-        
+
         // Manually create an input to test sequence behavior
         input_manager.current_input = InputState {
             sequence: input_manager.next_sequence,
@@ -196,7 +199,7 @@ mod tests {
             jump: false,
         };
         input_manager.next_sequence += 1;
-        
+
         assert_eq!(input_manager.current_input.sequence, 1);
         assert_eq!(input_manager.next_sequence, 2);
     }
@@ -205,7 +208,7 @@ mod tests {
     fn test_input_state_consistency() {
         let input_manager = InputManager::new();
         let input_state = input_manager.get_current_input();
-        
+
         assert_eq!(input_state.sequence, 0);
         assert_eq!(input_state.timestamp, 0);
         assert!(!input_state.left);
@@ -216,10 +219,10 @@ mod tests {
     #[test]
     fn test_sequence_overflow_safety() {
         let mut input_manager = InputManager::new();
-        
+
         // Test near u32::MAX to ensure no panic
         input_manager.next_sequence = u32::MAX - 1;
-        
+
         // Simulate sequence increment
         input_manager.current_input = InputState {
             sequence: input_manager.next_sequence,
@@ -229,10 +232,10 @@ mod tests {
             jump: false,
         };
         input_manager.next_sequence += 1;
-        
+
         assert_eq!(input_manager.current_input.sequence, u32::MAX - 1);
         assert_eq!(input_manager.next_sequence, u32::MAX);
-        
+
         // Test overflow
         input_manager.current_input = InputState {
             sequence: input_manager.next_sequence,
@@ -242,7 +245,7 @@ mod tests {
             jump: false,
         };
         input_manager.next_sequence = input_manager.next_sequence.wrapping_add(1);
-        
+
         assert_eq!(input_manager.current_input.sequence, u32::MAX);
         assert_eq!(input_manager.next_sequence, 0);
     }
@@ -250,11 +253,11 @@ mod tests {
     #[test]
     fn test_timestamp_validity() {
         let timestamp = InputManager::get_timestamp();
-        
+
         // Should be a reasonable timestamp (after 2020)
         let year_2020_ms = 1577836800000u64; // Jan 1, 2020
         assert!(timestamp > year_2020_ms);
-        
+
         // Should be before year 2100
         let year_2100_ms = 4102444800000u64; // Jan 1, 2100
         assert!(timestamp < year_2100_ms);
@@ -263,18 +266,18 @@ mod tests {
     #[test]
     fn test_edge_detection_state_tracking() {
         let mut input_manager = InputManager::new();
-        
+
         // Test initial state
         assert!(!input_manager.prev_key_1);
         assert!(!input_manager.prev_key_2);
         assert!(!input_manager.prev_key_3);
         assert!(!input_manager.prev_key_r);
         assert!(!input_manager.prev_key_g);
-        
+
         // Test state persistence after manual update
         input_manager.prev_key_1 = true;
         input_manager.prev_key_2 = true;
-        
+
         assert!(input_manager.prev_key_1);
         assert!(input_manager.prev_key_2);
         assert!(!input_manager.prev_key_3);
@@ -289,9 +292,9 @@ mod tests {
             right: false,
             jump: true,
         };
-        
+
         let cloned = input_state.clone();
-        
+
         assert_eq!(cloned.sequence, 42);
         assert_eq!(cloned.timestamp, 12345);
         assert!(cloned.left);
@@ -303,11 +306,11 @@ mod tests {
     fn test_timing_calculations() {
         let input_manager = InputManager::new();
         let start_time = input_manager.last_input_sent;
-        
+
         // Test that last_input_sent is recent
         let now = Instant::now();
         let elapsed = now.duration_since(start_time);
-        
+
         // Should be less than 1 second old
         assert!(elapsed < Duration::from_secs(1));
     }
@@ -315,7 +318,7 @@ mod tests {
     #[test]
     fn test_input_change_detection_logic() {
         let mut input_manager = InputManager::new();
-        
+
         // Set initial state
         input_manager.current_input = InputState {
             sequence: 1,
@@ -324,24 +327,24 @@ mod tests {
             right: false,
             jump: false,
         };
-        
+
         // Test change detection logic manually
         let left = true;
         let right = false;
         let jump = false;
-        
+
         let input_changed = left != input_manager.current_input.left
             || right != input_manager.current_input.right
             || jump != input_manager.current_input.jump;
-        
+
         assert!(input_changed); // Should detect left key change
-        
+
         // Test no change
         let left = false;
         let input_changed = left != input_manager.current_input.left
             || right != input_manager.current_input.right
             || jump != input_manager.current_input.jump;
-        
+
         assert!(!input_changed); // Should detect no change
     }
 
@@ -349,10 +352,10 @@ mod tests {
     fn test_keepalive_timing() {
         let input_manager = InputManager::new();
         let keepalive_interval = Duration::from_millis(16); // 60Hz
-        
+
         // Test timing calculation
         let time_to_send = input_manager.last_input_sent.elapsed() >= keepalive_interval;
-        
+
         // Initially should not need to send (just created)
         assert!(!time_to_send);
     }
@@ -370,7 +373,7 @@ mod tests {
             (false, true, true),
             (true, true, true),
         ];
-        
+
         for (left, right, jump) in combinations.iter() {
             let input_state = InputState {
                 sequence: 1,
@@ -379,7 +382,7 @@ mod tests {
                 right: *right,
                 jump: *jump,
             };
-            
+
             // All combinations should be valid
             assert_eq!(input_state.left, *left);
             assert_eq!(input_state.right, *right);
@@ -399,10 +402,10 @@ mod tests {
             (false, false, false, false, true),
             (true, true, true, true, true),
         ];
-        
+
         for (pred, recon, interp, reconnect, graph) in toggle_combinations.iter() {
             let toggles = (*pred, *recon, *interp, *reconnect, *graph);
-            
+
             assert_eq!(toggles.0, *pred);
             assert_eq!(toggles.1, *recon);
             assert_eq!(toggles.2, *interp);

@@ -43,7 +43,7 @@ impl NetworkGraph {
     pub fn new() -> Self {
         Self {
             metrics_history: VecDeque::new(),
-            max_samples: 100, // Store last 100 samples
+            max_samples: 100,                            // Store last 100 samples
             sample_interval: Duration::from_millis(100), // Sample every 100ms
             last_sample_time: Instant::now(),
 
@@ -288,7 +288,7 @@ impl NetworkGraph {
             self.ping_scale_max * 0.75,
             self.ping_scale_max,
         ];
-        
+
         for &ping_level in &ping_levels {
             let label_y = y + usable_height - (ping_level / self.ping_scale_max * usable_height);
             let label_text = if ping_level == 0.0 {

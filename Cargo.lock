@@ -499,6 +499,7 @@ dependencies = [
  "bincode",
  "client",
  "serde",
+ "server",
  "shared",
  "tokio",
  "tokio-test",

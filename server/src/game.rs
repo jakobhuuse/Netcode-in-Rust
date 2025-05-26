@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn test_apply_input_nonexistent_player() {
         let mut game_state = GameState::new();
-        
+
         let input = InputState {
             sequence: 1,
             timestamp: 0,
@@ -234,7 +234,7 @@ mod tests {
 
         game_state.apply_input(1, &input, 1.0 / 60.0);
         let player = game_state.players.get(&1).unwrap();
-        
+
         // Should cancel out to zero movement
         assert_eq!(player.vel_x, 0.0);
     }
@@ -261,7 +261,7 @@ mod tests {
 
         let initial_vel_y = game_state.players.get(&1).unwrap().vel_y;
         game_state.apply_input(1, &jump_input, 1.0 / 60.0);
-        
+
         // Jump should not activate when airborne
         let player = game_state.players.get(&1).unwrap();
         assert_eq!(player.vel_y, initial_vel_y);
@@ -320,7 +320,11 @@ mod tests {
         game_state.update_physics(dt);
 
         let player = game_state.players.get(&1).unwrap();
-        assert_eq!(player.x, WORLD_WIDTH - PLAYER_SIZE, "Player should be clamped to right boundary");
+        assert_eq!(
+            player.x,
+            WORLD_WIDTH - PLAYER_SIZE,
+            "Player should be clamped to right boundary"
+        );
     }
 
     #[test]
@@ -361,7 +365,11 @@ mod tests {
         game_state.update_physics(dt);
 
         let player = game_state.players.get(&1).unwrap();
-        assert_eq!(player.y, FLOOR_Y - PLAYER_SIZE, "Player should be positioned on floor");
+        assert_eq!(
+            player.y,
+            FLOOR_Y - PLAYER_SIZE,
+            "Player should be positioned on floor"
+        );
         assert_eq!(player.vel_y, 0.0, "Downward velocity should be stopped");
         assert!(player.on_ground, "Player should be marked as on ground");
     }
@@ -381,7 +389,7 @@ mod tests {
 
         let dt = 1.0 / 60.0;
         let initial_vel_y = game_state.players.get(&1).unwrap().vel_y;
-        
+
         game_state.update_physics(dt);
 
         let player = game_state.players.get(&1).unwrap();
@@ -393,7 +401,7 @@ mod tests {
     #[test]
     fn test_handle_collisions_multiple_players() {
         let mut game_state = GameState::new();
-        
+
         // Add three players in a line that will collide
         game_state.add_player(1);
         game_state.add_player(2);
@@ -421,10 +429,10 @@ mod tests {
 
         let dt = 1.0 / 60.0;
         let initial_pos1 = game_state.players.get(&1).unwrap().x;
-        
+
         // Single physics update should at least start collision resolution
         game_state.update_physics(dt);
-        
+
         // Check if collision resolution is working
         let mut collision_occurred = false;
         for player in game_state.players.values() {
@@ -434,40 +442,45 @@ mod tests {
                 break;
             }
         }
-        
+
         // If no collision occurred, the test setup might be wrong
         if !collision_occurred {
             // Check if players were actually overlapping initially
             let player1 = game_state.players.get(&1).unwrap();
             let player2 = game_state.players.get(&2).unwrap();
             let player3 = game_state.players.get(&3).unwrap();
-            
-            println!("Player positions after physics: P1={:.1}, P2={:.1}, P3={:.1}", 
-                player1.x, player2.x, player3.x);
-            println!("Player velocities: P1={:.1}, P2={:.1}, P3={:.1}", 
-                player1.vel_x, player2.vel_x, player3.vel_x);
+
+            println!(
+                "Player positions after physics: P1={:.1}, P2={:.1}, P3={:.1}",
+                player1.x, player2.x, player3.x
+            );
+            println!(
+                "Player velocities: P1={:.1}, P2={:.1}, P3={:.1}",
+                player1.vel_x, player2.vel_x, player3.vel_x
+            );
         }
-        
+
         // At minimum, verify that collision resolution attempts were made
         // Even if full separation takes multiple frames, some progress should occur
         let final_pos1 = game_state.players.get(&1).unwrap().x;
-        
+
         // Either player1 moved forward, or collision velocities were exchanged
         let momentum_transferred = collision_occurred || final_pos1 != initial_pos1;
-        assert!(momentum_transferred, 
-            "Collision resolution should have occurred - either momentum transfer or position change");
-            
+        assert!(momentum_transferred, "Collision resolution should have occurred - either momentum transfer or position change");
+
         // Verify all players remain within bounds
         for player in game_state.players.values() {
-            assert!(player.x >= 0.0 && player.x <= WORLD_WIDTH - PLAYER_SIZE, 
-                "All players should remain within world bounds");
+            assert!(
+                player.x >= 0.0 && player.x <= WORLD_WIDTH - PLAYER_SIZE,
+                "All players should remain within world bounds"
+            );
         }
     }
 
     #[test]
     fn test_spawn_position_distribution() {
         let mut game_state = GameState::new();
-        
+
         // Add multiple players and check spawn distribution
         for id in 1..=5 {
             game_state.add_player(id);
@@ -476,11 +489,11 @@ mod tests {
         let mut spawn_positions = Vec::new();
         for player in game_state.players.values() {
             spawn_positions.push(player.x);
-            
+
             // All players should spawn on the floor
             assert_eq!(player.y, FLOOR_Y - PLAYER_SIZE);
             assert!(player.on_ground);
-            
+
             // All players should be within world bounds
             assert!(player.x >= 0.0);
             assert!(player.x <= WORLD_WIDTH - PLAYER_SIZE);
@@ -489,8 +502,11 @@ mod tests {
         // Spawn positions should be different (no exact overlaps)
         spawn_positions.sort_by(|a, b| a.partial_cmp(b).unwrap());
         for i in 1..spawn_positions.len() {
-            assert_ne!(spawn_positions[i], spawn_positions[i-1], 
-                "Spawn positions should be distributed");
+            assert_ne!(
+                spawn_positions[i],
+                spawn_positions[i - 1],
+                "Spawn positions should be distributed"
+            );
         }
     }
 
@@ -498,10 +514,10 @@ mod tests {
     fn test_tick_advancement() {
         let mut game_state = GameState::new();
         let initial_tick = game_state.tick;
-        
+
         let dt = 1.0 / 60.0;
         game_state.update_physics(dt);
-        
+
         // Tick should not change during physics update
         assert_eq!(game_state.tick, initial_tick);
     }
@@ -539,11 +555,11 @@ mod tests {
         // Test that physics simulation is deterministic
         let mut game_state1 = GameState::new();
         let mut game_state2 = GameState::new();
-        
+
         // Set up identical initial conditions
         game_state1.add_player(1);
         game_state2.add_player(1);
-        
+
         let input = InputState {
             sequence: 1,
             timestamp: 0,
@@ -551,25 +567,73 @@ mod tests {
             right: true,
             jump: true,
         };
-        
+
         let dt = 1.0 / 60.0;
-        
+
         // Apply same sequence of operations
         for _ in 0..100 {
             game_state1.apply_input(1, &input, dt);
             game_state1.update_physics(dt);
-            
+
             game_state2.apply_input(1, &input, dt);
             game_state2.update_physics(dt);
         }
-        
+
         let player1 = game_state1.players.get(&1).unwrap();
         let player2 = game_state2.players.get(&1).unwrap();
-        
+
         assert_approx_eq!(player1.x, player2.x, 0.001);
         assert_approx_eq!(player1.y, player2.y, 0.001);
         assert_approx_eq!(player1.vel_x, player2.vel_x, 0.001);
         assert_approx_eq!(player1.vel_y, player2.vel_y, 0.001);
         assert_eq!(player1.on_ground, player2.on_ground);
+    }
+
+    #[test]
+    fn test_rapid_player_add_remove() {
+        let mut game_state = GameState::new();
+
+        // Rapidly add and remove players
+        for i in 1..=10 {
+            game_state.add_player(i);
+            assert!(game_state.players.contains_key(&i));
+
+            if i % 2 == 0 {
+                game_state.remove_player(&i);
+                assert!(!game_state.players.contains_key(&i));
+            }
+        }
+
+        // Should have only odd-numbered players
+        assert_eq!(game_state.players.len(), 5);
+        for i in [1, 3, 5, 7, 9] {
+            assert!(game_state.players.contains_key(&i));
+        }
+    }
+
+    #[test]
+    fn test_input_flood_resilience() {
+        let mut game_state = GameState::new();
+        game_state.add_player(1);
+
+        // Simulate input flooding
+        let dt = 1.0 / 60.0;
+        for sequence in 1..=1000 {
+            let input = InputState {
+                sequence,
+                timestamp: sequence as u64,
+                left: sequence % 2 == 0,
+                right: sequence % 3 == 0,
+                jump: sequence % 7 == 0,
+            };
+
+            game_state.apply_input(1, &input, dt);
+            game_state.update_physics(dt);
+        }
+
+        // Player should still be in valid state
+        let player = game_state.players.get(&1).unwrap();
+        assert!(player.x >= 0.0 && player.x <= WORLD_WIDTH - PLAYER_SIZE);
+        assert!(player.y >= 0.0 && player.y <= FLOOR_Y);
     }
 }

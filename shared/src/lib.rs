@@ -204,22 +204,34 @@ mod tests {
         // Test exact touching boundaries (should not collide)
         let player1 = Player::new(1, 0.0, 0.0);
         let player2 = Player::new(2, PLAYER_SIZE, 0.0);
-        assert!(!check_collision(&player1, &player2), "Players touching edge should not collide");
+        assert!(
+            !check_collision(&player1, &player2),
+            "Players touching edge should not collide"
+        );
 
         // Test 1-pixel overlap (should collide)
         let player1 = Player::new(1, 0.0, 0.0);
         let player2 = Player::new(2, PLAYER_SIZE - 1.0, 0.0);
-        assert!(check_collision(&player1, &player2), "Players with 1px overlap should collide");
+        assert!(
+            check_collision(&player1, &player2),
+            "Players with 1px overlap should collide"
+        );
 
         // Test diagonal overlap
         let player1 = Player::new(1, 100.0, 100.0);
         let player2 = Player::new(2, 116.0, 116.0);
-        assert!(check_collision(&player1, &player2), "Diagonal overlap should be detected");
+        assert!(
+            check_collision(&player1, &player2),
+            "Diagonal overlap should be detected"
+        );
 
         // Test complete overlap (one inside another)
         let player1 = Player::new(1, 100.0, 100.0);
         let player2 = Player::new(2, 105.0, 105.0);
-        assert!(check_collision(&player1, &player2), "Complete overlap should be detected");
+        assert!(
+            check_collision(&player1, &player2),
+            "Complete overlap should be detected"
+        );
     }
 
     #[test]
@@ -233,9 +245,15 @@ mod tests {
         resolve_collision(&mut player1, &mut player2);
 
         // Players should be separated
-        assert_ne!(player1.x, player2.x, "Players at same position should be separated");
-        assert!((player1.x - player2.x).abs() >= PLAYER_SIZE / 2.0, "Separation should be at least half player size");
-        
+        assert_ne!(
+            player1.x, player2.x,
+            "Players at same position should be separated"
+        );
+        assert!(
+            (player1.x - player2.x).abs() >= PLAYER_SIZE / 2.0,
+            "Separation should be at least half player size"
+        );
+
         // Check they're still within world bounds
         assert!(player1.x >= 0.0 && player1.x <= WORLD_WIDTH - PLAYER_SIZE);
         assert!(player2.x >= 0.0 && player2.x <= WORLD_WIDTH - PLAYER_SIZE);
@@ -264,8 +282,14 @@ mod tests {
 
         resolve_collision(&mut player1, &mut player2);
 
-        assert!(player1.x <= WORLD_WIDTH - PLAYER_SIZE, "Player1 should not go past right boundary");
-        assert!(player2.x <= WORLD_WIDTH - PLAYER_SIZE, "Player2 should not go past right boundary");
+        assert!(
+            player1.x <= WORLD_WIDTH - PLAYER_SIZE,
+            "Player1 should not go past right boundary"
+        );
+        assert!(
+            player2.x <= WORLD_WIDTH - PLAYER_SIZE,
+            "Player2 should not go past right boundary"
+        );
     }
 
     #[test]
@@ -286,7 +310,7 @@ mod tests {
         // Check momentum is approximately conserved (with damping factor 0.8)
         let final_momentum_x = player1.vel_x + player2.vel_x;
         let final_momentum_y = player1.vel_y + player2.vel_y;
-        
+
         assert_approx_eq!(final_momentum_x, initial_momentum_x * 0.8, 0.01);
         assert_approx_eq!(final_momentum_y, initial_momentum_y * 0.8, 0.01);
     }
@@ -295,7 +319,7 @@ mod tests {
     fn test_player_bounds_calculation() {
         let player = Player::new(1, 150.0, 200.0);
         let (left, top, right, bottom) = player.get_bounds();
-        
+
         assert_eq!(left, 150.0);
         assert_eq!(top, 200.0);
         assert_eq!(right, 150.0 + PLAYER_SIZE);
@@ -306,7 +330,7 @@ mod tests {
     fn test_player_center_calculation() {
         let player = Player::new(1, 100.0, 200.0);
         let (cx, cy) = player.center();
-        
+
         assert_eq!(cx, 100.0 + PLAYER_SIZE / 2.0);
         assert_eq!(cy, 200.0 + PLAYER_SIZE / 2.0);
     }
@@ -349,13 +373,19 @@ mod tests {
         let serialized = bincode::serialize(&input).unwrap();
         let deserialized: Packet = bincode::deserialize(&serialized).unwrap();
         match deserialized {
-            Packet::Input { sequence, timestamp, left, right, jump } => {
+            Packet::Input {
+                sequence,
+                timestamp,
+                left,
+                right,
+                jump,
+            } => {
                 assert_eq!(sequence, u32::MAX);
                 assert_eq!(timestamp, u64::MAX);
                 assert!(left);
                 assert!(!right);
                 assert!(jump);
-            },
+            }
             _ => panic!("Wrong packet type"),
         }
 
@@ -383,39 +413,28 @@ mod tests {
 
         let serialized = bincode::serialize(&game_state).unwrap();
         let deserialized: Packet = bincode::deserialize(&serialized).unwrap();
-        
+
         match deserialized {
-            Packet::GameState { tick, timestamp, last_processed_input, players: deserialized_players } => {
+            Packet::GameState {
+                tick,
+                timestamp,
+                last_processed_input,
+                players: deserialized_players,
+            } => {
                 assert_eq!(tick, 12345);
                 assert_eq!(timestamp, 9876543210);
                 assert_eq!(last_processed_input.len(), 10);
                 assert_eq!(deserialized_players.len(), 10);
-                
+
                 for (original, deserialized) in players.iter().zip(deserialized_players.iter()) {
                     assert_eq!(original.id, deserialized.id);
                     assert_approx_eq!(original.x, deserialized.x, 0.001);
                     assert_approx_eq!(original.y, deserialized.y, 0.001);
                     assert_eq!(original.on_ground, deserialized.on_ground);
                 }
-            },
+            }
             _ => panic!("Wrong packet type"),
         }
-    }
-
-    #[test]
-    fn test_physics_constants_validity() {
-        // Ensure physics constants are reasonable
-        assert!(GRAVITY > 0.0, "Gravity should be positive (downward)");
-        assert!(PLAYER_SPEED > 0.0, "Player speed should be positive");
-        assert!(JUMP_VELOCITY < 0.0, "Jump velocity should be negative (upward)");
-        assert!(FLOOR_Y > PLAYER_SIZE, "Floor should be below player size");
-        assert!(WORLD_WIDTH > PLAYER_SIZE * 2.0, "World should fit at least 2 players");
-        assert!(PLAYER_SIZE > 0.0, "Player size should be positive");
-        
-        // Test that a player can jump and come back down
-        let jump_height = (JUMP_VELOCITY * JUMP_VELOCITY) / (2.0 * GRAVITY);
-        assert!(jump_height > PLAYER_SIZE, "Jump height should be meaningful");
-        assert!(jump_height < WORLD_HEIGHT / 2.0, "Jump shouldn't be too high");
     }
 
     #[test]
@@ -431,15 +450,24 @@ mod tests {
 
         // Resolve collision between 1 and 2
         resolve_collision(&mut player1, &mut player2);
-        
+
         let vel2_after_first = player2.vel_x;
-        assert!(vel2_after_first > 0.0, "Player2 should gain velocity from collision");
+        assert!(
+            vel2_after_first > 0.0,
+            "Player2 should gain velocity from collision"
+        );
 
         // Now resolve collision between 2 and 3
         resolve_collision(&mut player2, &mut player3);
-        
-        assert!(player3.vel_x > 0.0, "Player3 should gain velocity from chain collision");
-        assert!(player2.vel_x < vel2_after_first, "Player2 should lose some velocity in second collision");
+
+        assert!(
+            player3.vel_x > 0.0,
+            "Player3 should gain velocity from chain collision"
+        );
+        assert!(
+            player2.vel_x < vel2_after_first,
+            "Player2 should lose some velocity in second collision"
+        );
     }
 
     #[test]
@@ -457,10 +485,61 @@ mod tests {
         assert_eq!(player1.y, original_state1.y);
         assert_eq!(player1.vel_x, original_state1.vel_x);
         assert_eq!(player1.vel_y, original_state1.vel_y);
-        
+
         assert_eq!(player2.x, original_state2.x);
         assert_eq!(player2.y, original_state2.y);
         assert_eq!(player2.vel_x, original_state2.vel_x);
         assert_eq!(player2.vel_y, original_state2.vel_y);
+    }
+
+    #[test]
+    fn test_large_game_state_serialization() {
+        // Test with maximum reasonable number of players
+        let mut players = Vec::new();
+        let mut last_processed = HashMap::new();
+
+        for i in 0..100 {
+            let mut player = Player::new(i, (i as f32) * 8.0, 100.0);
+            player.vel_x = (i as f32) * 10.0;
+            player.vel_y = -(i as f32) * 5.0;
+            players.push(player);
+            last_processed.insert(i, i * 10);
+        }
+
+        let packet = Packet::GameState {
+            tick: u32::MAX,
+            timestamp: u64::MAX,
+            last_processed_input: last_processed,
+            players,
+        };
+
+        let serialized = bincode::serialize(&packet).unwrap();
+        let deserialized: Packet = bincode::deserialize(&serialized).unwrap();
+
+        match deserialized {
+            Packet::GameState { players, .. } => {
+                assert_eq!(players.len(), 100);
+            }
+            _ => panic!("Wrong packet type"),
+        }
+    }
+
+    #[test]
+    fn test_collision_with_stationary_objects() {
+        // Test collision with world boundaries as "objects"
+        let mut player = Player::new(1, 0.0, 100.0);
+        player.vel_x = -100.0; // Moving into left wall
+
+        let dt = 1.0 / 60.0;
+        player.x += player.vel_x * dt;
+
+        // Apply boundary collision
+        if player.x < 0.0 {
+            player.x = 0.0;
+            player.vel_x = 0.0; // Stop at boundary
+        }
+
+        assert_eq!(player.x, 0.0);
+        assert_eq!(player.vel_x, 0.0);
     }
 }

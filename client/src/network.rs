@@ -436,7 +436,7 @@ impl Client {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or(Duration::from_secs(0))
                 .as_millis() as u64;
-            
+
             return if now_ms >= server_timestamp {
                 now_ms.saturating_sub(server_timestamp).min(10)
             } else {
@@ -585,15 +585,15 @@ mod tests {
         // Since Client::new is async and requires socket binding,
         // we'll test the logical initial state values
         let fake_ping_ms = 100;
-        
+
         // Test expected initial values
         assert_eq!(fake_ping_ms, 100);
         assert!(fake_ping_ms > 0);
-        
+
         // Test connection state logic
         let connected = false;
         let client_id: Option<u32> = None;
-        
+
         assert!(!connected);
         assert!(client_id.is_none());
     }
@@ -601,17 +601,17 @@ mod tests {
     #[test]
     fn test_ping_calculation_localhost() {
         let mut client = create_test_client();
-        
+
         // Test localhost ping calculation
         let now_ms = SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;
-        
+
         // Server timestamp slightly in the past
         let server_timestamp = now_ms - 50;
         let ping = client.calculate_robust_ping(server_timestamp);
-        
+
         // Should be small for localhost
         assert!(ping <= 10);
     }
@@ -619,16 +619,16 @@ mod tests {
     #[test]
     fn test_ping_calculation_future_timestamp() {
         let mut client = create_test_client();
-        
+
         let now_ms = SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;
-        
+
         // Server timestamp in the future (clock skew)
         let server_timestamp = now_ms + 1000;
         let ping = client.calculate_robust_ping(server_timestamp);
-        
+
         // Should handle gracefully
         assert!(ping <= 2000);
     }
@@ -636,17 +636,17 @@ mod tests {
     #[test]
     fn test_ping_history_management() {
         let mut ping_history = VecDeque::new();
-        
+
         // Add more than 10 samples
         for i in 1..=15 {
             ping_history.push_back(i * 10);
-            
+
             // Keep only last 10 ping samples
             while ping_history.len() > 10 {
                 ping_history.pop_front();
             }
         }
-        
+
         assert_eq!(ping_history.len(), 10);
         assert_eq!(ping_history.front(), Some(&60)); // Should start from 6th element
         assert_eq!(ping_history.back(), Some(&150));
@@ -654,20 +654,20 @@ mod tests {
 
     #[test]
     fn test_ping_averaging() {
-        let ping_samples = vec![50, 60, 55, 65, 58];
+        let ping_samples = [50, 60, 55, 65, 58];
         let sum: u64 = ping_samples.iter().sum();
         let average = sum / ping_samples.len() as u64;
-        
+
         assert_eq!(average, 57); // (50+60+55+65+58)/5 = 288/5 = 57
     }
 
     #[test]
     fn test_ping_validation() {
         let ping_candidates = vec![0, 50, 100, 500, 1000, 2000, 3000];
-        
+
         for ping in ping_candidates {
             let is_valid = ping <= 2000;
-            
+
             if ping <= 2000 {
                 assert!(is_valid);
             } else {
@@ -680,10 +680,10 @@ mod tests {
     fn test_connection_timeout_logic() {
         let last_packet_received = Instant::now();
         let connection_timeout = Duration::from_secs(5);
-        
+
         // Should not timeout immediately
         assert!(last_packet_received.elapsed() < connection_timeout);
-        
+
         // Test timeout detection logic
         let old_time = Instant::now() - Duration::from_secs(6);
         assert!(old_time.elapsed() > connection_timeout);
@@ -694,12 +694,12 @@ mod tests {
         let client_time = 1000u64;
         let server_time_ahead = 1100u64;
         let server_time_behind = 900u64;
-        
+
         // Server ahead
         let offset_ahead = server_time_ahead.saturating_sub(client_time) as i64;
         assert_eq!(offset_ahead, 100);
-        
-        // Server behind  
+
+        // Server behind
         let offset_behind = if client_time >= server_time_behind {
             -(client_time.saturating_sub(server_time_behind) as i64)
         } else {
@@ -712,16 +712,16 @@ mod tests {
     fn test_packet_queuing_timing() {
         let mut outgoing_packets = VecDeque::new();
         let fake_ping_ms = 100u64;
-        
+
         // Simulate packet queuing
         let data = vec![1, 2, 3, 4];
         let delay_ms = fake_ping_ms / 2; // One-way latency
         let send_time = Instant::now() + Duration::from_millis(delay_ms);
-        
+
         outgoing_packets.push_back((data.clone(), send_time));
-        
+
         assert_eq!(outgoing_packets.len(), 1);
-        
+
         // Check timing logic
         let now = Instant::now();
         let should_send = if let Some((_, time)) = outgoing_packets.front() {
@@ -729,7 +729,7 @@ mod tests {
         } else {
             false
         };
-        
+
         // Should not send immediately due to artificial latency
         assert!(!should_send);
     }
@@ -739,22 +739,22 @@ mod tests {
         let mut prediction_enabled = true;
         let mut reconciliation_enabled = true;
         let mut interpolation_enabled = true;
-        
+
         // Test toggle logic
         prediction_enabled = !prediction_enabled;
         assert!(!prediction_enabled);
-        
+
         reconciliation_enabled = !reconciliation_enabled;
         assert!(!reconciliation_enabled);
-        
+
         interpolation_enabled = !interpolation_enabled;
         assert!(!interpolation_enabled);
-        
+
         // Toggle back
         prediction_enabled = !prediction_enabled;
         reconciliation_enabled = !reconciliation_enabled;
         interpolation_enabled = !interpolation_enabled;
-        
+
         assert!(prediction_enabled);
         assert!(reconciliation_enabled);
         assert!(interpolation_enabled);
@@ -769,10 +769,10 @@ mod tests {
             (false, false, false, true, false),
             (false, false, false, false, true),
         ];
-        
+
         for (pred, recon, interp, reconnect, graph) in test_toggles.iter() {
             let toggles = (*pred, *recon, *interp, *reconnect, *graph);
-            
+
             assert_eq!(toggles.0, *pred);
             assert_eq!(toggles.1, *recon);
             assert_eq!(toggles.2, *interp);
@@ -785,14 +785,14 @@ mod tests {
     fn test_time_interval_calculations() {
         let input_interval = Duration::from_millis(16); // 60Hz
         let render_interval = Duration::from_millis(16); // 60 FPS
-        
+
         assert_eq!(input_interval.as_millis(), 16);
         assert_eq!(render_interval.as_millis(), 16);
-        
+
         // Test frequency calculation
         let input_hz = 1000.0 / input_interval.as_millis() as f64;
         let render_fps = 1000.0 / render_interval.as_millis() as f64;
-        
+
         assert!((input_hz - 62.5).abs() < 0.1); // ~62.5 Hz
         assert!((render_fps - 62.5).abs() < 0.1); // ~62.5 FPS
     }
@@ -802,7 +802,7 @@ mod tests {
         let buffer_size = 2048;
         assert!(buffer_size >= 1024); // Minimum reasonable size
         assert!(buffer_size <= 65536); // Maximum reasonable size
-        
+
         // Test that common packet sizes fit
         let typical_packet_sizes = vec![64, 128, 256, 512, 1024];
         for size in typical_packet_sizes {
@@ -820,11 +820,11 @@ mod tests {
     #[test]
     fn test_sequence_overflow_safety() {
         let mut sequence = u32::MAX - 1;
-        
+
         // Test normal increment
         sequence += 1;
         assert_eq!(sequence, u32::MAX);
-        
+
         // Test overflow handling
         sequence = sequence.wrapping_add(1);
         assert_eq!(sequence, 0);
@@ -836,11 +836,11 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;
-        
+
         // Should be a reasonable timestamp
         let year_2020_ms = 1577836800000u64;
         let year_2100_ms = 4102444800000u64;
-        
+
         assert!(timestamp > year_2020_ms);
         assert!(timestamp < year_2100_ms);
     }
@@ -848,18 +848,18 @@ mod tests {
     #[test]
     fn test_clock_drift_detection() {
         let mut clock_offset_samples = VecDeque::new();
-        
+
         // Simulate consistent clock offset
         let consistent_offset = 100i64;
         for _ in 0..5 {
             clock_offset_samples.push_back(consistent_offset);
         }
-        
+
         // Calculate median
         let mut offsets: Vec<i64> = clock_offset_samples.iter().cloned().collect();
         offsets.sort();
         let median = offsets[offsets.len() / 2];
-        
+
         assert_eq!(median, consistent_offset);
         assert!(median.abs() < 10000); // Reasonable offset
     }
@@ -867,13 +867,13 @@ mod tests {
     #[test]
     fn test_ping_clamping() {
         let test_pings = vec![0, 50, 100, 1000, 2000, 5000, 10000];
-        
+
         for ping in test_pings {
             let clamped = ping.clamp(0, 2000);
-            
+
             assert!(clamped >= 0);
             assert!(clamped <= 2000);
-            
+
             if ping <= 2000 {
                 assert_eq!(clamped, ping);
             } else {
@@ -886,17 +886,17 @@ mod tests {
     fn test_packet_send_time_tracking() {
         let mut packet_send_times = VecDeque::new();
         let max_samples = 20;
-        
+
         // Add samples
         for i in 0..25 {
             packet_send_times.push_back((i as u64, Instant::now()));
-            
+
             // Keep only last 20 samples
             if packet_send_times.len() > max_samples {
                 packet_send_times.pop_front();
             }
         }
-        
+
         assert_eq!(packet_send_times.len(), max_samples);
         assert_eq!(packet_send_times.front().unwrap().0, 5); // Should start from 5th element
         assert_eq!(packet_send_times.back().unwrap().0, 24);
@@ -931,7 +931,7 @@ mod tests {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or(Duration::from_secs(0))
                     .as_millis() as u64;
-                
+
                 return if now_ms >= server_timestamp {
                     now_ms.saturating_sub(server_timestamp).min(10)
                 } else {
@@ -952,6 +952,52 @@ mod tests {
             };
 
             raw_ping.clamp(0, 2000)
+        }
+    }
+
+    #[test]
+    fn test_connection_state_transitions() {
+        // Test the full connection lifecycle
+        let mut connected;
+        let mut client_id: Option<u32>;
+
+        // Connect
+        client_id = Some(42);
+        connected = true;
+        assert!(connected && client_id.is_some());
+
+        // Disconnect
+        connected = false;
+        client_id = None;
+        assert!(!connected && client_id.is_none());
+    }
+
+    #[test]
+    fn test_packet_ordering_under_latency() {
+        let mut packets = VecDeque::new();
+
+        // Simulate packets arriving out of order due to network latency
+        packets.push_back((Instant::now() + Duration::from_millis(100), 1u32));
+        packets.push_back((Instant::now() + Duration::from_millis(50), 2u32));
+        packets.push_back((Instant::now() + Duration::from_millis(150), 3u32));
+
+        // Sort by process time (when they should be handled)
+        packets.make_contiguous().sort_by_key(|(time, _)| *time);
+
+        let order: Vec<u32> = packets.iter().map(|(_, id)| *id).collect();
+        assert_eq!(order, vec![2, 1, 3]); // Should process in arrival order
+    }
+
+    #[test]
+    fn test_artificial_latency_bounds() {
+        let fake_ping_values = vec![0, 50, 100, 500, 1000];
+
+        for fake_ping in fake_ping_values {
+            let one_way_latency = fake_ping / 2;
+
+            // Ensure latency values are reasonable
+            assert!(one_way_latency <= 500); // Max 500ms one-way
+            assert!(fake_ping <= 1000); // Max 1s round-trip
         }
     }
 }
