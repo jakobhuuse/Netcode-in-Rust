@@ -21,13 +21,14 @@ assert_approx_eq = "1.1.0"
 
 # Dependencies for integration tests (workspace root needs these)
 [dependencies]
-shared = { path = "shared" }
-client = { path = "client" }
 tokio = { workspace = true }
 serde = { workspace = true }
 bincode = { workspace = true }
 
 [dev-dependencies]
+shared = { path = "shared" }
+client = { path = "client" }
+server = { path = "server" }
 tokio-test = { workspace = true }
 assert_approx_eq = { workspace = true }
 
