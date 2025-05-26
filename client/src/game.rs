@@ -301,9 +301,10 @@ impl ClientGameState {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or(std::time::Duration::from_secs(0))
-            .as_millis() as u64;
+            .as_millis();
+        let now_safe = (now.min(u64::MAX as u128)) as u64;
 
-        let render_time = now.saturating_sub(150);
+        let render_time = now_safe.saturating_sub(150);
 
         // Find the two states to interpolate between
         let mut before = None;
