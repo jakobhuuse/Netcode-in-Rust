@@ -2,6 +2,7 @@
 
 use crate::game::{ClientGameState, ServerStateConfig};
 use crate::input::InputManager;
+use crate::network_graph::NetworkGraph;
 use crate::rendering::{RenderConfig, Renderer};
 use bincode::{deserialize, serialize};
 use log::{error, info, warn};
@@ -23,12 +24,13 @@ pub struct Client {
     game_state: ClientGameState,
     input_manager: InputManager,
     renderer: Renderer,
+    network_graph: NetworkGraph,
 
     // Connection monitoring
     real_ping_ms: u64,
     fake_ping_ms: u64,
     ping_ms: u64,
-    ping_history: VecDeque<u64>, // For smoothing ping calculations
+    ping_history: VecDeque<u64>,
     last_packet_received: Instant,
     connection_timeout: Duration,
 
@@ -62,6 +64,7 @@ impl Client {
             game_state: ClientGameState::new(),
             input_manager: InputManager::new(),
             renderer,
+            network_graph: NetworkGraph::new(),  // Initialize network graph
             real_ping_ms: 0,
             fake_ping_ms,
             ping_ms: 0,
@@ -135,6 +138,9 @@ impl Client {
     /// Sends packet with optional artificial latency
     async fn send_packet(&mut self, packet: &Packet) -> Result<(), Box<dyn std::error::Error>> {
         let data = serialize(packet)?;
+
+        // Record packet being sent for network graph
+        self.network_graph.record_packet_sent();
 
         if self.fake_ping_ms > 0 {
             // Simulate one-way latency (half of round-trip time)
@@ -226,6 +232,9 @@ impl Client {
                     // If ping is unreasonable, keep the previous value
                     
                     self.ping_ms = self.real_ping_ms + self.fake_ping_ms;
+                    
+                    // Record packet received for network graph
+                    self.network_graph.record_packet_received(self.ping_ms as f32);
                 }
 
                 let config = ServerStateConfig {
@@ -281,8 +290,8 @@ impl Client {
         Ok(())
     }
 
-    /// Handles runtime toggle of netcode features
-    fn handle_toggles(&mut self, toggles: (bool, bool, bool, bool)) -> bool {
+    /// Handles runtime toggle of netcode features and network graph
+    fn handle_toggles(&mut self, toggles: (bool, bool, bool, bool, bool)) -> bool {
         let mut reconnect_requested = false;
 
         if toggles.0 {
@@ -300,6 +309,10 @@ impl Client {
         if toggles.3 {
             info!("Reconnection requested");
             reconnect_requested = true;
+        }
+        if toggles.4 {
+            self.network_graph.toggle_visibility();
+            info!("Network graph: {}", if self.network_graph.is_visible() { "shown" } else { "hidden" });
         }
 
         reconnect_requested
@@ -392,6 +405,9 @@ impl Client {
                 };
 
                 self.renderer.render(&players, render_config);
+                
+                // Render network graph on top of everything else
+                self.network_graph.render();
 
                 last_render_time = Instant::now();
                 next_frame().await;

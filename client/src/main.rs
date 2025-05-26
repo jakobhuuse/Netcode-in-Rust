@@ -3,6 +3,7 @@
 mod game;
 mod input;
 mod network;
+mod network_graph;
 mod rendering;
 
 use clap::Parser;
@@ -51,6 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     info!("Controls: A/D to move, Space to jump");
     info!("Press 1/2/3 to toggle Prediction/Reconciliation/Interpolation");
+    info!("Press G to toggle Network Graph");
     info!("Press R to reconnect to server");
 
     let mut client = network::Client::new(&args.server, args.fake_ping).await?;

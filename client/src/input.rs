@@ -15,6 +15,7 @@ pub struct InputManager {
     prev_key_2: bool,
     prev_key_3: bool,
     prev_key_r: bool,
+    prev_key_g: bool,
 }
 
 impl InputManager {
@@ -33,12 +34,13 @@ impl InputManager {
             prev_key_2: false,
             prev_key_3: false,
             prev_key_r: false,
+            prev_key_g: false,
         }
     }
 
     /// Updates input state and returns control events and optional network input
-    /// Returns: ((prediction_toggle, reconciliation_toggle, interpolation_toggle, reconnect), input_to_send)
-    pub fn update(&mut self) -> ((bool, bool, bool, bool), Option<InputState>) {
+    /// Returns: ((prediction_toggle, reconciliation_toggle, interpolation_toggle, reconnect, graph_toggle), input_to_send)
+    pub fn update(&mut self) -> ((bool, bool, bool, bool, bool), Option<InputState>) {
         // Sample movement keys (support both WASD and arrow keys)
         let left = is_key_down(KeyCode::A) || is_key_down(KeyCode::Left);
         let right = is_key_down(KeyCode::D) || is_key_down(KeyCode::Right);
@@ -49,8 +51,9 @@ impl InputManager {
         let key_2 = is_key_down(KeyCode::Key2);
         let key_3 = is_key_down(KeyCode::Key3);
         let key_r = is_key_down(KeyCode::R);
+        let key_g = is_key_down(KeyCode::G);
 
-        let mut toggles = (false, false, false, false);
+        let mut toggles = (false, false, false, false, false);
 
         // Detect key press events (current && !previous)
         if key_1 && !self.prev_key_1 {
@@ -65,12 +68,16 @@ impl InputManager {
         if key_r && !self.prev_key_r {
             toggles.3 = true; // Reconnect
         }
+        if key_g && !self.prev_key_g {
+            toggles.4 = true; // Toggle network graph
+        }
 
         // Update previous key states
         self.prev_key_1 = key_1;
         self.prev_key_2 = key_2;
         self.prev_key_3 = key_3;
         self.prev_key_r = key_r;
+        self.prev_key_g = key_g;
 
         // Check if input state changed
         let input_changed = left != self.current_input.left
