@@ -256,10 +256,25 @@ impl NetworkGraph {
         }
         
         // Vertical grid lines (time intervals)
-        let time_divisions = 10;
-        for i in 1..time_divisions {
-            let grid_x = x + (i as f32 / time_divisions as f32) * usable_width;
-            draw_line(grid_x, y, grid_x, y + usable_height, 1.0, grid_color);
+        let time_divisions = 5;
+        let time_span_ms = self.get_time_span_ms();
+        
+        if time_span_ms > 0.0 {
+            for i in 1..time_divisions {
+                let grid_x = x + (i as f32 / time_divisions as f32) * usable_width;
+                draw_line(grid_x, y, grid_x, y + usable_height, 1.0, grid_color);
+                
+                let time_offset_ms = (i as f32 / time_divisions as f32) * time_span_ms;
+                let time_ago_ms = time_span_ms - time_offset_ms;
+                let time_label = if time_ago_ms > 1000.0 {
+                    format!("-{:.1}s", time_ago_ms / 1000.0)
+                } else {
+                    format!("-{:.0}ms", time_ago_ms)
+                };
+                draw_text(&time_label, grid_x - 15.0, y + usable_height + 12.0, 9.0, Color::from_rgba(180, 180, 180, 255));
+            }
+            
+            draw_text("now", x + usable_width - 12.0, y + usable_height + 12.0, 9.0, Color::from_rgba(180, 180, 180, 255));
         }
     }
     
@@ -272,15 +287,26 @@ impl NetworkGraph {
         let usable_width = self.graph_width - (self.internal_padding * 2.0);
         let usable_height = self.graph_height - (self.internal_padding * 2.0);
         
-        let x_step = usable_width / (self.max_samples - 1) as f32;
+        // Calculate time span for proper X-axis scaling
+        let time_span_ms = self.get_time_span_ms();
+        if time_span_ms <= 0.0 {
+            return;
+        }
+        
+        // Get the oldest timestamp as our reference point
+        let oldest_timestamp = self.metrics_history.front().unwrap().timestamp;
         
         for i in 1..self.metrics_history.len() {
             let prev_metrics = &self.metrics_history[i - 1];
             let curr_metrics = &self.metrics_history[i];
             
-            let x1 = x + (i - 1) as f32 * x_step;
+            // Calculate X positions based on time differences
+            let prev_time_offset = prev_metrics.timestamp.duration_since(oldest_timestamp).as_millis() as f32;
+            let curr_time_offset = curr_metrics.timestamp.duration_since(oldest_timestamp).as_millis() as f32;
+            
+            let x1 = x + (prev_time_offset / time_span_ms) * usable_width;
             let y1 = y + usable_height - (prev_metrics.ping_ms / self.ping_scale_max * usable_height);
-            let x2 = x + i as f32 * x_step;
+            let x2 = x + (curr_time_offset / time_span_ms) * usable_width;
             let y2 = y + usable_height - (curr_metrics.ping_ms / self.ping_scale_max * usable_height);
             
             // Color based on ping quality (these are the colored lines you see)
@@ -303,11 +329,21 @@ impl NetworkGraph {
         let usable_width = self.graph_width - (self.internal_padding * 2.0);
         let usable_height = self.graph_height - (self.internal_padding * 2.0);
         
-        let bar_width = usable_width / self.max_samples as f32;
+        // Calculate time span for proper X-axis scaling
+        let time_span_ms = self.get_time_span_ms();
+        if time_span_ms <= 0.0 {
+            return;
+        }
         
-        for (i, metrics) in self.metrics_history.iter().enumerate() {
+        // Get the oldest timestamp as our reference point
+        let oldest_timestamp = self.metrics_history.front().unwrap().timestamp;
+        let bar_width = (usable_width / self.max_samples as f32).max(2.0); // Minimum bar width
+        
+        for metrics in self.metrics_history.iter() {
             if metrics.packet_loss_percent > 0.1 {
-                let bar_x = x + i as f32 * bar_width;
+                // Calculate X position based on time
+                let time_offset = metrics.timestamp.duration_since(oldest_timestamp).as_millis() as f32;
+                let bar_x = x + (time_offset / time_span_ms) * usable_width;
                 let bar_height = (metrics.packet_loss_percent / 10.0 * usable_height * 0.3).min(usable_height * 0.3);
                 let bar_y = y + usable_height - bar_height;
                 
@@ -317,7 +353,7 @@ impl NetworkGraph {
                     Color::from_rgba(255, 0, 0, 200)
                 };
                 
-                draw_rectangle(bar_x, bar_y, bar_width * 0.8, bar_height, loss_color);
+                draw_rectangle(bar_x - bar_width / 2.0, bar_y, bar_width * 0.8, bar_height, loss_color);
             }
         }
     }
@@ -347,7 +383,8 @@ impl NetworkGraph {
                 latest.packet_loss_percent,
                 latest.jitter_ms
             );
-            draw_text(&current_info, x - self.internal_padding, y + usable_height + 15.0, font_size, label_color);
+            
+            draw_text(&current_info, x - self.internal_padding, y + usable_height + 28.0, font_size, label_color);
         }
     }
     
@@ -384,6 +421,17 @@ impl NetworkGraph {
             draw_text("Quality:", x, explanation_y + 12.0, 10.0, WHITE);
             draw_text(ping_explanation, x + 45.0, explanation_y + 12.0, 10.0, quality_color);
         }
+    }
+    
+    /// Calculate the time span covered by the current metrics history in milliseconds
+    fn get_time_span_ms(&self) -> f32 {
+        if self.metrics_history.len() < 2 {
+            return 0.0;
+        }
+        
+        let oldest = self.metrics_history.front().unwrap().timestamp;
+        let newest = self.metrics_history.back().unwrap().timestamp;
+        newest.duration_since(oldest).as_millis() as f32
     }
 }
 
