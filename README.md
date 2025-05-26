@@ -153,6 +153,7 @@ cargo run -p client -- --fake-ping 50
 -   `2`: Toggle server reconciliation on/off
 -   `3`: Toggle interpolation on/off
 -   `R`: Reconnect to server
+-   `G`: Toggle network graph
 
 **Visual Elements:**
 
@@ -243,7 +244,7 @@ client.run().await  // Starts the main client game loop
 For detailed API documentation:
 
 ```bash
-cargo doc --open --no-deps
+cargo doc --workspace --no-deps --open
 ```
 
 ## Contributing
