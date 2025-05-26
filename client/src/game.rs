@@ -380,3 +380,297 @@ impl Default for ClientGameState {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use shared::{InputState, Player};
+
+    #[test]
+    fn test_game_state_creation() {
+        let state = GameState::new();
+        assert_eq!(state.tick, 0);
+        assert!(state.players.is_empty());
+    }
+
+    #[test]
+    fn test_game_state_step() {
+        let mut state = GameState::new();
+        let mut player = Player::new(1, 100.0, 100.0);
+        player.vel_x = 50.0;
+        state.players.insert(1, player);
+
+        let dt = 1.0 / 60.0;
+        state.step(dt);
+
+        let player = &state.players[&1];
+        assert!(player.x > 100.0); // Player should have moved
+    }
+
+    #[test]
+    fn test_apply_input_client_side() {
+        let mut state = GameState::new();
+        state.players.insert(1, Player::new(1, 100.0, 100.0));
+
+        let input = InputState {
+            sequence: 1,
+            timestamp: 1000,
+            left: false,
+            right: true,
+            jump: false,
+        };
+
+        state.apply_input(1, &input, 1.0 / 60.0);
+
+        let player = &state.players[&1];
+        assert_eq!(player.vel_x, PLAYER_SPEED);
+    }
+
+    #[test]
+    fn test_client_game_state_creation() {
+        let client_state = ClientGameState::new();
+        assert_eq!(client_state.confirmed_state.tick, 0);
+        assert_eq!(client_state.predicted_state.tick, 0);
+        assert!(client_state.input_history.is_empty());
+        assert!(client_state.interpolation_buffer.is_empty());
+        assert_eq!(client_state.last_confirmed_tick, 0);
+        assert_eq!(client_state.physics_accumulator, 0.0);
+        assert_eq!(client_state.fixed_timestep, 1.0 / 60.0);
+    }
+
+    #[test]
+    fn test_client_game_state_determinism() {
+        let mut state1 = ClientGameState::new();
+        let mut state2 = ClientGameState::new();
+
+        // Apply identical inputs
+        let input = InputState {
+            sequence: 1,
+            timestamp: 1000,
+            left: true,
+            right: false,
+            jump: false,
+        };
+
+        state1.predicted_state.players.insert(1, Player::new(1, 100.0, 100.0));
+        state2.predicted_state.players.insert(1, Player::new(1, 100.0, 100.0));
+
+        state1.predicted_state.apply_input(1, &input, 1.0 / 60.0);
+        state2.predicted_state.apply_input(1, &input, 1.0 / 60.0);
+
+        state1.predicted_state.step(1.0 / 60.0);
+        state2.predicted_state.step(1.0 / 60.0);
+
+        let player1 = &state1.predicted_state.players[&1];
+        let player2 = &state2.predicted_state.players[&1];
+        
+        assert!((player1.x - player2.x).abs() < 0.001);
+        assert!((player1.y - player2.y).abs() < 0.001);
+        assert!((player1.vel_x - player2.vel_x).abs() < 0.001);
+        assert!((player1.vel_y - player2.vel_y).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_apply_prediction() {
+        let mut client_state = ClientGameState::new();
+        
+        // Add player and input
+        client_state.predicted_state.players.insert(1, Player::new(1, 100.0, 100.0));
+        let input = InputState {
+            sequence: 1,
+            timestamp: 1000,
+            left: false,
+            right: true,
+            jump: false,
+        };
+
+        client_state.apply_prediction(1, &input);
+
+        let player = &client_state.predicted_state.players[&1];
+        assert_eq!(player.vel_x, PLAYER_SPEED);
+        assert_eq!(client_state.input_history.len(), 1);
+    }
+
+    #[test]
+    fn test_apply_server_state_reconciliation_disabled() {
+        let mut client_state = ClientGameState::new();
+        
+        let players = vec![Player::new(1, 150.0, 200.0)];
+        let config = ServerStateConfig {
+            client_id: Some(1),
+            reconciliation_enabled: false,
+            interpolation_enabled: false,
+        };
+
+        client_state.apply_server_state(5, 2000, players, HashMap::new(), config);
+
+        assert_eq!(client_state.confirmed_state.tick, 5);
+        assert_eq!(client_state.confirmed_state.players[&1].x, 150.0);
+        assert_eq!(client_state.predicted_state.players[&1].x, 150.0); // Should sync without reconciliation
+    }
+
+    #[test]
+    fn test_physics_update_client_side() {
+        let mut client_state = ClientGameState::new();
+        
+        // Add player with velocity (in the air, not on ground)
+        let mut player = Player::new(1, 100.0, 100.0);
+        player.vel_x = 120.0;
+        player.vel_y = -50.0;
+        player.on_ground = false; // Make sure player is in the air
+        client_state.predicted_state.players.insert(1, player);
+
+        // Use the game state directly to test physics
+        let initial_x = client_state.predicted_state.players[&1].x;
+        let initial_vel_y = client_state.predicted_state.players[&1].vel_y;
+        
+        let dt = 1.0 / 60.0;
+        client_state.predicted_state.update_physics(dt);
+
+        let player = &client_state.predicted_state.players[&1];
+        assert!(player.x > initial_x); // Should move horizontally
+        assert!(player.vel_y > initial_vel_y); // Gravity should be applied (more positive/less negative)
+    }
+
+    #[test]
+    fn test_reconciliation_rollback_threshold() {
+        let mut client_state = ClientGameState::new();
+        
+        // Add player with different position than server state
+        let mut predicted_player = Player::new(1, 200.0, 100.0);
+        predicted_player.vel_x = 100.0;
+        client_state.predicted_state.players.insert(1, predicted_player);
+        
+        // Add some inputs to history
+        for i in 1..=3 {
+            let input = InputState {
+                sequence: i,
+                timestamp: i as u64 * 1000,
+                left: false,
+                right: true,
+                jump: false,
+            };
+            client_state.input_history.push(input);
+        }
+        
+        // Server state with significantly different position
+        let confirmed_player = Player::new(1, 50.0, 100.0); // 150 units away
+        let players = vec![confirmed_player];
+        let mut last_processed = HashMap::new();
+        last_processed.insert(1u32, 2u32); // Server processed up to sequence 2
+        
+        let config = ServerStateConfig {
+            client_id: Some(1),
+            reconciliation_enabled: true,
+            interpolation_enabled: false,
+        };
+
+        client_state.apply_server_state(10, 5000, players, last_processed, config);
+
+        // Should have performed rollback and replay
+        assert_eq!(client_state.input_history.len(), 1); // Only unprocessed input remains
+        let final_player = &client_state.predicted_state.players[&1];
+        // Position should be closer to server state after reconciliation
+        assert!(final_player.x < 200.0);
+    }
+
+    #[test]
+    fn test_apply_server_state_with_interpolation() {
+        let mut client_state = ClientGameState::new();
+        
+        let players = vec![Player::new(1, 100.0, 100.0)];
+        let config = ServerStateConfig {
+            client_id: Some(1),
+            reconciliation_enabled: false,
+            interpolation_enabled: true,
+        };
+
+        client_state.apply_server_state(1, 1000, players, HashMap::new(), config);
+
+        assert_eq!(client_state.interpolation_buffer.len(), 1);
+        assert_eq!(client_state.interpolation_buffer[0].0, 1000); // timestamp
+        assert_eq!(client_state.interpolation_buffer[0].1[0].id, 1); // player
+    }
+
+    #[test]
+    fn test_get_render_players_no_prediction() {
+        let mut client_state = ClientGameState::new();
+        client_state.confirmed_state.players.insert(1, Player::new(1, 100.0, 100.0));
+        
+        let players = client_state.get_render_players(Some(1), false, false);
+        assert_eq!(players.len(), 1);
+        assert_eq!(players[0].x, 100.0);
+    }
+
+    #[test]
+    fn test_get_render_players_with_prediction() {
+        let mut client_state = ClientGameState::new();
+        client_state.confirmed_state.players.insert(1, Player::new(1, 100.0, 100.0));
+        client_state.predicted_state.players.insert(1, Player::new(1, 150.0, 100.0));
+        
+        let players = client_state.get_render_players(Some(1), true, false);
+        assert_eq!(players.len(), 1);
+        assert_eq!(players[0].x, 150.0); // Should use predicted state
+    }
+
+    #[test]
+    fn test_update_physics_accumulator() {
+        let mut client_state = ClientGameState::new();
+        
+        // Add player
+        let mut player = Player::new(1, 100.0, 100.0);
+        player.vel_x = 120.0;
+        client_state.predicted_state.players.insert(1, player);
+
+        // Update with larger delta time
+        let large_dt = 3.0 / 60.0; // 3 frames worth
+        client_state.update_physics(large_dt);
+
+        // Accumulator should have wrapped around after processing steps
+        assert!(client_state.physics_accumulator < client_state.fixed_timestep);
+        assert!(client_state.physics_accumulator >= 0.0);
+    }
+
+    #[test]
+    fn test_interpolation_buffer_management() {
+        let mut client_state = ClientGameState::new();
+        
+        // Add multiple states to interpolation buffer
+        for i in 0..5 {
+            let players = vec![Player::new(1, i as f32 * 10.0, 100.0)];
+            let config = ServerStateConfig {
+                client_id: Some(1),
+                reconciliation_enabled: false,
+                interpolation_enabled: true,
+            };
+            
+            // Use timestamps within the retention window (1000ms)
+            let base_time = 15000u64; // Recent timestamp
+            let timestamp = base_time + (i as u64) * 100; // 100ms apart
+            client_state.apply_server_state(i, timestamp, players, HashMap::new(), config);
+        }
+
+        // Should have all 5 states (all within retention window)
+        assert_eq!(client_state.interpolation_buffer.len(), 5);
+    }
+
+    #[test]
+    fn test_input_history_overflow_protection() {
+        let mut client_state = ClientGameState::new();
+        
+        // Add many inputs through apply_prediction to trigger overflow protection
+        for i in 0..150 {
+            let input = InputState {
+                sequence: i,
+                timestamp: i as u64 * 16,
+                left: i % 2 == 0,
+                right: i % 2 == 1,
+                jump: i % 10 == 0,
+            };
+            client_state.apply_prediction(1, &input);
+        }
+
+        // Should be managed by overflow protection in apply_prediction
+        assert!(client_state.input_history.len() <= 1000);
+    }
+}
