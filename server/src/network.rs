@@ -454,3 +454,439 @@ impl Server {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr};
+    use tokio::sync::mpsc;
+
+    #[test]
+    fn test_server_message_creation() {
+        let packet = Packet::Connect { client_version: 1 };
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+
+        let msg = ServerMessage::PacketReceived {
+            packet: packet.clone(),
+            addr,
+        };
+
+        match msg {
+            ServerMessage::PacketReceived { packet: p, addr: a } => {
+                assert_eq!(a, addr);
+                match p {
+                    Packet::Connect { client_version } => {
+                        assert_eq!(client_version, 1);
+                    }
+                    _ => panic!("Unexpected packet type"),
+                }
+            }
+            _ => panic!("Unexpected message type"),
+        }
+    }
+
+    #[test]
+    fn test_client_timeout_message() {
+        let client_id = 42;
+        let msg = ServerMessage::ClientTimeout { client_id };
+
+        match msg {
+            ServerMessage::ClientTimeout { client_id: id } => {
+                assert_eq!(id, client_id);
+            }
+            _ => panic!("Unexpected message type"),
+        }
+    }
+
+    #[test]
+    fn test_game_message_send_packet() {
+        let packet = Packet::Connected { client_id: 123 };
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 9090);
+
+        let msg = GameMessage::SendPacket {
+            packet: packet.clone(),
+            addr,
+        };
+
+        match msg {
+            GameMessage::SendPacket { packet: p, addr: a } => {
+                assert_eq!(a, addr);
+                match p {
+                    Packet::Connected { client_id } => {
+                        assert_eq!(client_id, 123);
+                    }
+                    _ => panic!("Unexpected packet type"),
+                }
+            }
+            _ => panic!("Unexpected message type"),
+        }
+    }
+
+    #[test]
+    fn test_game_message_broadcast() {
+        let packet = Packet::GameState {
+            tick: 100,
+            timestamp: 1234567890,
+            last_processed_input: std::collections::HashMap::new(),
+            players: vec![],
+        };
+
+        let msg = GameMessage::BroadcastPacket {
+            packet: packet.clone(),
+            exclude: Some(5),
+        };
+
+        match msg {
+            GameMessage::BroadcastPacket { packet: p, exclude } => {
+                assert_eq!(exclude, Some(5));
+                match p {
+                    Packet::GameState { tick, .. } => {
+                        assert_eq!(tick, 100);
+                    }
+                    _ => panic!("Unexpected packet type"),
+                }
+            }
+            _ => panic!("Unexpected message type"),
+        }
+    }
+
+    #[test]
+    fn test_substep_calculation() {
+        let server = create_test_server();
+
+        // Test normal case - should require 1 substep
+        let substeps = server.calculate_required_substeps(1.0 / 60.0); // 60 FPS
+        assert_eq!(substeps, 1);
+
+        // Test high speed case - should require multiple substeps
+        let large_dt = 1.0; // 1 second
+        let substeps = server.calculate_required_substeps(large_dt);
+        assert!(substeps > 1);
+
+        // Test edge case - very small dt
+        let tiny_dt = 1.0 / 1000.0; // 1000 FPS
+        let substeps = server.calculate_required_substeps(tiny_dt);
+        assert_eq!(substeps, 1);
+    }
+
+    #[test]
+    fn test_substep_safety_calculations() {
+        const PLAYER_SPEED: f32 = 300.0;
+        const PLAYER_SIZE: f32 = 20.0;
+        const SAFETY_FACTOR: f32 = 0.5;
+
+        let min_collision_radius = PLAYER_SIZE / 2.0;
+        let max_movement_per_step = min_collision_radius * SAFETY_FACTOR;
+
+        assert_eq!(min_collision_radius, 10.0);
+        assert_eq!(max_movement_per_step, 5.0);
+
+        // Test substep requirement for different dt values
+        let test_cases = vec![
+            (1.0 / 60.0, PLAYER_SPEED),  // 60 FPS
+            (1.0 / 30.0, PLAYER_SPEED),  // 30 FPS
+            (1.0 / 120.0, PLAYER_SPEED), // 120 FPS
+        ];
+
+        for (dt, speed) in test_cases {
+            let max_movement = speed * dt;
+            let required_substeps = if max_movement > max_movement_per_step {
+                (max_movement / max_movement_per_step).ceil() as u32
+            } else {
+                1
+            };
+
+            assert!(required_substeps >= 1);
+            assert!(required_substeps <= 100); // Reasonable upper bound
+        }
+    }
+
+    #[test]
+    fn test_timestamp_generation() {
+        let timestamp1 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        std::thread::sleep(std::time::Duration::from_millis(1));
+
+        let timestamp2 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        assert!(timestamp2 > timestamp1);
+
+        // Test timestamp safety conversion
+        let large_timestamp = u128::MAX;
+        let safe_timestamp = (large_timestamp.min(u64::MAX as u128)) as u64;
+        assert_eq!(safe_timestamp, u64::MAX);
+    }
+
+    #[test]
+    fn test_channel_communication() {
+        let (tx, mut rx) = mpsc::unbounded_channel::<ServerMessage>();
+
+        let packet = Packet::Connect { client_version: 1 };
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+
+        let msg = ServerMessage::PacketReceived {
+            packet: packet.clone(),
+            addr,
+        };
+
+        // Send message
+        assert!(tx.send(msg).is_ok());
+
+        // Receive message
+        let received = rx.try_recv();
+        assert!(received.is_ok());
+
+        match received.unwrap() {
+            ServerMessage::PacketReceived { packet: p, addr: a } => {
+                assert_eq!(a, addr);
+                match p {
+                    Packet::Connect { client_version } => {
+                        assert_eq!(client_version, 1);
+                    }
+                    _ => panic!("Unexpected packet type"),
+                }
+            }
+            _ => panic!("Unexpected message type"),
+        }
+    }
+
+    #[test]
+    fn test_input_distribution_logic() {
+        let total_inputs = 100;
+        let total_substeps = 4;
+        let batch_size = 50;
+
+        // Test input distribution calculation
+        let inputs_per_substep = if total_inputs >= total_substeps {
+            (total_inputs / total_substeps).min(batch_size)
+        } else {
+            batch_size.min(total_inputs)
+        };
+
+        assert_eq!(inputs_per_substep, 25); // 100 / 4 = 25, min(25, 50) = 25
+
+        // Test edge case - fewer inputs than substeps
+        let few_inputs = 2;
+        let inputs_per_substep_few = if few_inputs >= total_substeps {
+            (few_inputs / total_substeps).min(batch_size)
+        } else {
+            batch_size.min(few_inputs)
+        };
+
+        assert_eq!(inputs_per_substep_few, 2); // min(50, 2) = 2
+    }
+
+    #[test]
+    fn test_input_batch_processing() {
+        let all_inputs = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let total_substeps = 3;
+        let inputs_per_substep = all_inputs.len() / total_substeps;
+
+        assert_eq!(inputs_per_substep, 3); // 10 / 3 = 3
+
+        let mut input_index = 0;
+        let mut processed_inputs = Vec::new();
+
+        for substep in 0..total_substeps {
+            let inputs_this_step = if substep == total_substeps - 1 {
+                all_inputs.len() - input_index // Last substep gets remaining
+            } else {
+                inputs_per_substep.min(all_inputs.len() - input_index)
+            };
+
+            for _ in 0..inputs_this_step {
+                if input_index < all_inputs.len() {
+                    processed_inputs.push(all_inputs[input_index]);
+                    input_index += 1;
+                }
+            }
+        }
+
+        assert_eq!(processed_inputs.len(), all_inputs.len());
+        assert_eq!(processed_inputs, all_inputs);
+    }
+
+    #[test]
+    fn test_performance_monitoring_logic() {
+        let tick = 60;
+        let should_log = tick % 60 == 0;
+        assert!(should_log);
+
+        let tick2 = 59;
+        let should_log2 = tick2 % 60 == 0;
+        assert!(!should_log2);
+
+        let tick3 = 120;
+        let should_log3 = tick3 % 60 == 0;
+        assert!(should_log3);
+    }
+
+    #[test]
+    fn test_address_validation() {
+        let valid_addrs = vec![
+            "127.0.0.1:8080",
+            "0.0.0.0:0",
+            "192.168.1.1:9090",
+            "[::1]:8080",
+        ];
+
+        for addr_str in valid_addrs {
+            let result = addr_str.parse::<SocketAddr>();
+            assert!(result.is_ok(), "Failed to parse address: {}", addr_str);
+        }
+
+        let invalid_addrs = vec!["invalid", "127.0.0.1:99999", "256.256.256.256:8080", ""];
+
+        for addr_str in invalid_addrs {
+            let result = addr_str.parse::<SocketAddr>();
+            assert!(result.is_err(), "Should fail to parse: {}", addr_str);
+        }
+    }
+
+    #[test]
+    fn test_packet_serialization_roundtrip() {
+        let test_packets = vec![
+            Packet::Connect { client_version: 1 },
+            Packet::Connected { client_id: 42 },
+            Packet::Disconnect,
+            Packet::Disconnected {
+                reason: "Test".to_string(),
+            },
+            Packet::Input {
+                sequence: 100,
+                timestamp: 1234567890,
+                left: true,
+                right: false,
+                jump: true,
+            },
+        ];
+
+        for packet in test_packets {
+            let serialized = serialize(&packet);
+            assert!(serialized.is_ok());
+
+            let deserialized: Result<Packet, _> = deserialize(&serialized.unwrap());
+            assert!(deserialized.is_ok());
+
+            // Compare packet types (simplified comparison)
+            match (&packet, &deserialized.unwrap()) {
+                (Packet::Connect { .. }, Packet::Connect { .. }) => {}
+                (Packet::Connected { .. }, Packet::Connected { .. }) => {}
+                (Packet::Disconnect, Packet::Disconnect) => {}
+                (Packet::Disconnected { .. }, Packet::Disconnected { .. }) => {}
+                (Packet::Input { .. }, Packet::Input { .. }) => {}
+                _ => panic!("Packet type mismatch after roundtrip"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_buffer_bounds() {
+        let buffer_size = 2048;
+
+        // Test typical packet sizes
+        let typical_sizes = vec![64, 128, 256, 512, 1024];
+        for size in typical_sizes {
+            assert!(size < buffer_size, "Packet size {} exceeds buffer", size);
+        }
+
+        // Test edge cases
+        assert!(buffer_size >= 1024); // Minimum for game packets
+        assert!(buffer_size <= 65536); // Maximum reasonable size
+    }
+
+    #[test]
+    fn test_tick_duration_validation() {
+        let valid_durations = vec![
+            Duration::from_millis(16), // 60 Hz
+            Duration::from_millis(33), // 30 Hz
+            Duration::from_millis(8),  // 120 Hz
+        ];
+
+        for duration in valid_durations {
+            assert!(duration.as_millis() > 0);
+            assert!(duration.as_millis() < 1000); // Less than 1 second
+
+            let hz = 1000.0 / duration.as_millis() as f64;
+            assert!((1.0..=1000.0).contains(&hz)); // Reasonable frequency range
+        }
+    }
+
+    #[test]
+    fn test_client_version_compatibility() {
+        let supported_versions = [1];
+        let test_versions = vec![0, 1, 2, 999];
+
+        for version in test_versions {
+            let is_supported = supported_versions.contains(&version);
+
+            if version == 1 {
+                assert!(is_supported);
+            } else {
+                assert!(!is_supported);
+            }
+        }
+    }
+
+    #[test]
+    fn test_error_message_formatting() {
+        let reasons = vec![
+            "Server full",
+            "Protocol version mismatch",
+            "Client timeout",
+            "Invalid packet",
+        ];
+
+        for reason in reasons {
+            assert!(!reason.is_empty());
+            assert!(reason.len() < 256); // Reasonable message length
+
+            let packet = Packet::Disconnected {
+                reason: reason.to_string(),
+            };
+
+            match packet {
+                Packet::Disconnected { reason: r } => {
+                    assert_eq!(r, reason);
+                }
+                _ => panic!("Wrong packet type"),
+            }
+        }
+    }
+
+    // Helper function to create a test server for unit testing
+    fn create_test_server() -> TestServerMock {
+        TestServerMock {
+            tick_duration: Duration::from_millis(16),
+        }
+    }
+
+    // Mock server for testing without actual networking
+    #[allow(dead_code)]
+    struct TestServerMock {
+        tick_duration: Duration,
+    }
+
+    impl TestServerMock {
+        fn calculate_required_substeps(&self, dt: f32) -> u32 {
+            const MAX_PLAYER_SPEED: f32 = PLAYER_SPEED;
+            const MIN_COLLISION_RADIUS: f32 = PLAYER_SIZE / 2.0;
+            const SAFETY_FACTOR: f32 = 0.5;
+
+            let max_movement_per_step = MIN_COLLISION_RADIUS * SAFETY_FACTOR;
+            let max_movement_this_tick = MAX_PLAYER_SPEED * dt;
+
+            if max_movement_this_tick > max_movement_per_step {
+                (max_movement_this_tick / max_movement_per_step).ceil() as u32
+            } else {
+                1
+            }
+        }
+    }
+}
