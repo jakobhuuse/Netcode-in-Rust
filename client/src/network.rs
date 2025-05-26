@@ -147,9 +147,6 @@ impl Client {
     async fn send_packet(&mut self, packet: &Packet) -> Result<(), Box<dyn std::error::Error>> {
         let data = serialize(packet)?;
 
-        // Record packet being sent for network graph
-        self.network_graph.record_packet_sent();
-
         if self.fake_ping_ms > 0 {
             // Simulate one-way latency (half of round-trip time)
             let delay_ms = self.fake_ping_ms / 2;
@@ -433,6 +430,20 @@ impl Client {
 
     /// Calculates ping using clock-drift resistant method for remote servers
     fn calculate_robust_ping(&mut self, server_timestamp: u64) -> u64 {
+        // For localhost testing, use simple calculation
+        if self.server_addr.ip().is_loopback() {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or(Duration::from_secs(0))
+                .as_millis() as u64;
+            
+            return if now_ms >= server_timestamp {
+                now_ms.saturating_sub(server_timestamp).min(10)
+            } else {
+                0
+            };
+        }
+
         // Track the relationship between server and client timestamps to detect clock drift
         self.last_server_timestamp = Some(server_timestamp);
 
